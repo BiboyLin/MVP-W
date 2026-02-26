@@ -8,18 +8,19 @@
 
 ```
 ┌─────────────────────┐      ┌─────────────────────┐
-│   ESP32-S3 (主控)  │      │    PC 云端         │
-│   (Watcher 设备)   │◄────►│    (大脑)          │
+│      Watcher      │      │    Cloud           │
+│   (ESP32-S3)      │◄────►│    (PC)           │
 ├─────────────────────┤      ├─────────────────────┤
 │ - 音视频采集        │      │ - LLM 分析          │
 │ - 屏幕显示/表情     │      │ - ASR 语音识别      │
 │ - 按键语音触发      │      │ - TTS 语音合成      │
-│ - UART → ESP32-MCU│      │ - Agent 意图理解    │
-└─────────┬───────────┘      └─────────────────────┘
+│ - WiFi/WebSocket   │      │ - Agent 意图理解    │
+│ - UART → MCU       │      └─────────────────────┘
+└─────────┬───────────┘
           │ UART
           ▼
 ┌─────────────────────┐
-│  ESP32 (身体/MCU)  │
+│  MCU (身体)         │
 │  (舵机控制)        │
 ├─────────────────────┤
 │ - 舵机 X/Y 轴      │
@@ -31,19 +32,20 @@
 
 | 功能 | 位置 | 说明 |
 |------|------|------|
-| **语音采集** | ESP32-S3 | I2S 麦克风 → Opus 编码 → WebSocket |
-| **语音播放** | ESP32-S3 | WebSocket ← Opus 解码 → I2S 喇叭 |
-| **视频采集** | ESP32-S3 | Himax 摄像头 → JPEG → WebSocket |
-| **屏幕显示** | ESP32-S3 | LVGL UI + 表情显示 |
-| **按键触发** | ESP32-S3 | 长按开始/结束语音输入 |
-| **运动控制** | ESP32-MCU | GPIO PWM → 舵机云台 |
-| **LLM/Agent** | PC 云端 | Claude API / 本地 LLM |
-| **ASR/STT** | PC 云端 | 语音转文字 |
-| **TTS** | PC 云端 | 文字转语音 |
+| **语音采集** | Watcher | I2S 麦克风 → Opus 编码 → WebSocket |
+| **语音播放** | Watcher | WebSocket ← Opus 解码 → I2S 喇叭 |
+| **视频采集** | Watcher | Himax 摄像头 → JPEG → WebSocket |
+| **屏幕显示** | Watcher | LVGL UI + 表情显示 |
+| **按键触发** | Watcher | 长按开始/结束语音输入 |
+| **WiFi/通信** | Watcher | WiFi 连接 + WebSocket 客户端 |
+| **运动控制** | MCU | GPIO PWM → 舵机云台 |
+| **LLM/Agent** | Cloud | Claude API / 本地 LLM |
+| **ASR/STT** | Cloud | 语音转文字 |
+| **TTS** | Cloud | 文字转语音 |
 
 ### 技术参考
 
-- **ESP32-S3 SDK**: 使用 Watcher-Firmware 官方 SDK (`sensecap-watcher`)
+- **Watcher SDK**: 使用 Watcher-Firmware 官方 SDK (`sensecap-watcher`)
 - **ESP32-MCU**: 参考 WatcherOld/MCU 架构 (`main.c`)
 - **硬件参数**: 参考 `Watcher-Firmware/examples/helloworld/local_components/sensecap-watcher/include/sensecap-watcher.h`
 
@@ -59,8 +61,8 @@
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌──────────────────────────┐      ┌────────────────────────────┐   │
-│   │    ESP32-S3 (主控)       │ WiFi │      PC 云端 (Python)     │   │
-│   │    (Watcher 设备)         │◄────►│                            │   │
+│   │        Watcher           │ WiFi │         Cloud (PC)        │   │
+│   │      (ESP32-S3)          │◄────►│                            │   │
 │   │                          │      │  ┌────────────────────────┐ │   │
 │   │  ┌────────────────────┐ │      │  │   WebSocket Server    │ │   │
 │   │  │  音频 Pipeline    │ │ 双向流│  │   - 音频流接收/发送  │ │   │
@@ -86,26 +88,31 @@
 │   │  └────────────────────┘ │      │  │   语音合成             │ │   │
 │   │                          │      │  └────────────────────────┘ │   │
 │   │  ┌────────────────────┐ │      └────────────────────────────┘   │
-│   │  │  UART 转发        │ │                                        │
-│   │  │  GPIO 43/44      │ │  ◄── 转发控制指令                    │
+│   │  │  WiFi + WebSocket │ │  ◄── 通信核心                      │
+│   │  │  (Station 模式)   │ │                                        │
+│   │  └────────────────────┘ │                                        │
+│   │  ┌────────────────────┐ │                                        │
+│   │  │  UART 转发        │ │  ◄── 转发控制指令                    │
+│   │  │  GPIO 19/20     │ │                                        │
 │   │  └────────┬─────────┘ │                                        │
 │   └───────────┼───────────┘                                        │
 │               │ UART 115200                                        │
 │               │ (交叉连接 TX↔RX)                                   │
 │               ▼                                                    │
 │   ┌──────────────────────────┐                                    │
-│   │   ESP32 (身体/MCU)       │  ← 参考 WatcherOld/MCU 架构      │
+│   │         MCU              │  ← 舵机控制                        │
+│   │    (ESP32 身体)          │                                    │
 │   │                          │                                    │
 │   │  ┌────────────────────┐ │                                    │
-│   │  │  UART 接收        │ │  ← 接收主控指令                    │
-│   │  │  GPIO 16/17       │ │                                    │
+│   │  │  UART 接收        │ │  ← 接收 Watcher 指令                │
+│   │  │  GPIO 19/20       │ │                                    │
 │   │  └────────┬─────────┘ │                                    │
 │   │           │            │                                    │
 │   │           ▼            │                                    │
 │   │  ┌────────────────────┐ │                                    │
 │   │  │  舵机控制         │ │  ← X/Y 轴 PWM                    │
 │   │  │  - GPIO 12 (X)   │ │                                    │
-│   │  │  - GPIO 13 (Y)   │ │  ← 参考 WatcherOld/MCU/main.c     │
+│   │  │  - GPIO 13 (Y)   │ │                                    │
 │   │  │  LEDC PWM 50Hz   │ │                                    │
 │   │  └────────────────────┘ │                                    │
 │   │                          │                                    │
@@ -117,7 +124,7 @@
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 1.2 ESP32-S3 (主控) GPIO 分配
+### 1.2 Watcher GPIO 分配
 
 > **参考**: `Watcher-Firmware/examples/helloworld/local_components/sensecap-watcher/include/sensecap-watcher.h`
 
@@ -132,17 +139,17 @@
 | GPIO 21 | Himax CS | 摄像头 |
 | GPIO 38,39 | Touch I2C | 触摸屏 |
 | GPIO 41,42 | 旋钮 Encoder | 按钮输入 |
-| GPIO 43 | UART TX | → ESP32-MCU RX |
-| GPIO 44 | UART RX | ← ESP32-MCU TX |
+| GPIO 19 | UART0 TX | → ESP32-MCU RX (GPIO 19) | 外部引脚，烧录时需断开 |
+| GPIO 20 | UART0 RX | ← ESP32-MCU TX (GPIO 20) | 外部引脚，烧录时需断开 |
 
-### 1.3 ESP32 (身体/MCU) GPIO 分配
+### 1.3 MCU GPIO 分配
 
 > **参考**: `WatcherOld/MCU/main/main.c`
 
 | GPIO | 功能 | 说明 |
 |------|------|------|
-| GPIO 16 | UART RX | 接收主控指令 |
-| GPIO 17 | UART TX | 发送响应 |
+| GPIO 19 | UART TX | 发送响应 (→ S3 RX) |
+| GPIO 20 | UART RX | 接收 Watcher 指令 (← S3 TX) |
 | GPIO 12 | 舵机 X 轴 | PWM 输出 |
 | GPIO 13 | 舵机 Y 轴 | PWM 输出 |
 | GPIO 2 | LED 状态 | 指示灯 |
@@ -150,17 +157,17 @@
 ### 1.4 通信接口
 
 ```
-PC (Server)              ESP32-S3 (主控)          ESP32-MCU
-──────────              ───────────────          ──────────
-:8766 (WS)  ◄─────────────────────────────────► 连接建立
+Cloud (PC)                 Watcher (S3)              MCU
+─────────                 ─────────────           ───────
+:8766 (WS)  ◄─────────────────────────────────► WiFi 连接
 
-控制指令 (PC → S3 → MCU):
+控制指令 (PC → Watcher → MCU):
 {"type": "servo", "x": 90, "y": 45}  ──────►  X:90\r\nY:45\r\n
 
-TTS 播放 (PC → S3):
+TTS 播放 (PC → Watcher):
 {"type": "tts", "text": "你好"}  ──► 音频播放
 
-屏幕显示 (PC → S3):
+屏幕显示 (PC → Watcher):
 {"type": "display", "text": "你好", "emoji": "happy"}
 
 媒体流:
@@ -172,12 +179,12 @@ JPEG Image ──────────────────────►
 
 ## 二、软件架构
 
-### 2.1 ESP32-S3 (主控) 架构
+### 2.1 Watcher 架构
 
 > 基于 Watcher-Firmware 官方 SDK
 
 ```
-ESP32-S3 Firmware (MVP-W)
+Watcher Firmware (MVP-W)
 │
 ├── main/
 │   ├── app_main.c              # 入口 + 系统初始化
@@ -217,12 +224,12 @@ ESP32-S3 Firmware (MVP-W)
 └── CMakeLists.txt
 ```
 
-### 2.2 ESP32-MCU (身体) 架构
+### 2.2 MCU 架构
 
 > 参考 WatcherOld/MCU 架构
 
 ```
-ESP32-MCU Firmware
+MCU Firmware
 │
 ├── main/
 │   ├── main.c                 # 入口 + 核心逻辑
@@ -241,9 +248,62 @@ ESP32-MCU Firmware
 └── CMakeLists.txt
 ```
 
-### 2.3 按键语音触发流程
+### 2.3 语音触发流程
 
-> 使用 Watcher-Firmware 官方 SDK 中的旋钮按钮
+> 支持两种模式：离线唤醒词 + 按键触发
+
+#### 2.3.1 唤醒词模式 (推荐)
+
+使用乐鑫 ESP-SR 语音识别框架，实现离线唤醒词检测：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    唤醒词触发流程                             │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │              ESP-SR 语音识别框架                       │  │
+│  │   (运行在 Watcher 端，无需网络)                       │  │
+│  └──────────────────────────────────────────────────────┘  │
+│                           │                                  │
+│                           ▼                                  │
+│  1. 监听麦克风 (VAD 持续检测)                               │
+│     └── esp_sr_init() → 启动语音识别                       │
+│                    │                                        │
+│                    ▼                                        │
+│  2. 检测唤醒词 ("小微小微" / "你好小微")                   │
+│     └── esp_wn_register_callback() → 回调                  │
+│                    │                                        │
+│                    ▼                                        │
+│  3. 唤醒成功 → 本地反馈                                    │
+│     ├── 舵机微动 (抬头/眨眼)                               │
+│     ├── 屏幕显示 "我在听"                                  │
+│     └── 蜂鸣器短响                                         │
+│                    │                                        │
+│                    ▼                                        │
+│  4. 开始录音 → 云端 ASR                                    │
+│     └── 后续流程同按键模式 (见下文)                        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**唤醒词配置:**
+
+```c
+// esp_wn_config.h
+#define WAKENET_MODEL       "wn_model.bin"
+#define WAKENET_KEYWORD     "你好小微"  // 可自定义
+#define DETECTION_THRESHOLD 0.8
+
+// 初始化
+esp_wn_handle_t wn_handle = NULL;
+esp_wn_create(&wn_handle);
+esp_wn_register_callback(wn_handle, wake_word_callback);
+```
+
+#### 2.3.2 按键模式 (备用)
+
+当唤醒词未启用时，可使用旋钮按钮长按触发：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -259,7 +319,7 @@ ESP32-MCU Firmware
 │                    │                                        │
 │                    ▼                                        │
 │  3. 实时 Opus 编码 → WebSocket 发送                        │
-│     └── opus_encode() → ws_send(audio)                       │
+│     └── opus_encode() → ws_send(audio)                     │
 │                    │                                        │
 │                    ▼                                        │
 │  4. 用户松开按钮                                             │
@@ -304,10 +364,10 @@ ESP32-MCU Firmware
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.5 PC 云端架构
+### 2.5 Cloud 架构
 
 ```
-PC Backend (MVP-W-Server)
+Cloud Backend (MVP-W-Server)
 │
 ├── server/
 │   ├── websocket_server.py   # WebSocket 服务
@@ -336,15 +396,16 @@ PC Backend (MVP-W-Server)
 ```python
 # 消息类型枚举
 class MessageType:
-    # 控制指令 (PC -> ESP32)
+    # 控制指令 (Cloud → Watcher)
     SERVO_CONTROL = "servo"        # 舵机控制
     TTS_PLAY = "tts"              # 语音播放
     DISPLAY_TEXT = "display"       # 显示文字
     DISPLAY_IMAGE = "display_image" # 显示图像
     GET_SENSOR = "get_sensor"     # 获取传感器
+    STATUS = "status"             # 状态反馈 (AI 思考中/回复中)
     REBOOT = "reboot"             # 重启
 
-    # 媒体流 (ESP32 -> PC)
+    # 媒体流 (Watcher → Cloud)
     AUDIO_STREAM = "audio"        # 音频流
     VIDEO_STREAM = "video"        # 视频流
     SENSOR_DATA = "sensor"         # 传感器数据
@@ -356,7 +417,7 @@ class MessageType:
     PONG = "pong"
 ```
 
-#### 3.1.2 控制指令 (PC → ESP32)
+#### 3.1.2 控制指令 (Cloud → Watcher)
 
 ```json
 // 舵机控制
@@ -385,9 +446,23 @@ class MessageType:
     "type": "capture",
     "quality": 80
 }
+
+// 状态反馈 (AI 思考中/回复中)
+{
+    "type": "status",
+    "state": "thinking",
+    "message": "正在思考..."
+}
+
+// 状态反馈 (AI 回复中)
+{
+    "type": "status",
+    "state": "speaking",
+    "message": "回答中..."
+}
 ```
 
-#### 3.1.3 媒体流 (ESP32 → PC)
+#### 3.1.3 媒体流 (Watcher → Cloud)
 
 ```json
 // 音频流
@@ -440,7 +515,7 @@ PC Server                              ESP32 Client
 
 ## 四、功能模块
 
-### 4.1 音频模块 (ESP32)
+### 4.1 音频模块 (Watcher)
 
 #### 4.1.1 音频采集
 
@@ -475,7 +550,7 @@ PC Server                              ESP32 Client
 | 编码 | Opus | 低带宽 |
 | 比特率 | 16-32 kbps | 可调 |
 
-### 4.2 视频模块 (ESP32)
+### 4.2 视频模块 (Watcher)
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -490,7 +565,7 @@ PC Server                              ESP32 Client
 | 格式 | JPEG | 压缩传输 |
 | 帧率 | ~5 fps | 受限于传输带宽 |
 
-### 4.3 运动控制模块 (ESP32)
+### 4.3 运动控制模块 (MCU)
 
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
@@ -514,9 +589,115 @@ uint32_t angle_to_duty(int angle) {
 }
 ```
 
-### 4.4 云端模块 (Python)
+### 4.4 AI 思考状态反馈
 
-#### 4.4.1 WebSocket 服务器
+当云端 Agent 正在处理请求时，需要向设备反馈当前状态：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 AI 思考状态反馈流程                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  用户说话                                                     │
+│     │                                                        │
+│     ▼                                                        │
+│  ┌─────────────────┐                                        │
+│  │  音频上传云端    │                                        │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────┐                                        │
+│  │  发送 status:   │  ◄── 关键: 立即反馈                   │
+│  │  thinking       │      避免用户感到"死机"               │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Watcher 端响应                          │   │
+│  │  - 屏幕显示 "思考中..." 动效                        │   │
+│  │  - MCU 舵机微动 (抬头/晃脑)                       │   │
+│  │  - 可选: 蜂鸣器短响提示                            │   │
+│  └─────────────────────────────────────────────────────┘   │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────┐                                        │
+│  │  LLM 处理完成    │                                        │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────┐                                        │
+│  │  发送 status:   │                                        │
+│  │  speaking       │                                        │
+│  └────────┬────────┘                                        │
+│           │                                                 │
+│           ▼                                                 │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Watcher 端响应                          │   │
+│  │  - 屏幕显示回复内容 + 表情                          │   │
+│  │  - TTS 播放语音                                     │   │
+│  │  - 舵机恢复到自然姿态                               │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 状态枚举
+
+```python
+class AgentState:
+    IDLE = "idle"           # 空闲状态
+    THINKING = "thinking"   # AI 思考中
+    SPEAKING = "speaking"   # AI 回复中
+    ERROR = "error"         # 错误状态
+```
+
+#### Watcher 端状态处理
+
+```c
+// status_handler.c
+void handle_status_message(const char* state) {
+    if (strcmp(state, "thinking") == 0) {
+        // 显示思考中动效
+        lv_anim_start(&thinking_animation);
+
+        // 舵机微动 - 抬头
+        uart_send_cmd("X:85\r\nY:60\r\n");  // 轻微抬头
+    }
+    else if (strcmp(state, "speaking") == 0) {
+        // 停止思考动效
+        lv_anim_stop(&thinking_animation);
+
+        // 舵机恢复自然姿态
+        uart_send_cmd("X:90\r\nY:90\r\n");
+    }
+    else if (strcmp(state, "idle") == 0) {
+        // 恢复待机状态
+        uart_send_cmd("X:90\r\nY:90\r\n");
+    }
+}
+```
+
+#### MCU 端微动响应
+
+```c
+// mcu_servo.c
+void servo_subtle_move() {
+    // 轻微抬头动作 (15-30度范围)
+    int current_y = servo_get_position(Y_AXIS);
+    int target_y = current_y + (random() % 30 - 15);
+
+    // 平滑移动到目标位置
+    servo_smooth_move(Y_AXIS, target_y, 500);  // 500ms 移动
+
+    // 轻微左右晃动
+    vTaskDelay(pdMS_TO_TICKS(300));
+    servo_smooth_move(X_AXIS, 90 + (random() % 20 - 10), 300);
+}
+```
+
+### 4.5 Cloud 模块
+
+#### 4.5.1 WebSocket 服务器
 
 ```python
 class WatcherServer:
@@ -543,7 +724,7 @@ class WatcherServer:
             await self.handle_servo(data)
 ```
 
-#### 4.4.2 LLM Agent 集成
+#### 4.5.2 LLM Agent 集成
 
 ```python
 class Agent:
@@ -575,28 +756,32 @@ class Agent:
 
 ## 五、实施计划
 
-### Phase 1: 基础通信 (1 周)
+### Phase 1: 基础通信 (10h)
 
 - [ ] ESP32 WebSocket 客户端
 - [ ] PC WebSocket 服务器
 - [ ] 双向文本消息通信
 - [ ] 连接状态管理
+- [ ] **可靠性机制**
+  - [ ] 看门狗 (Watchdog) 配置
+  - [ ] WebSocket 自动重连
+  - [ ] 异常日志输出
 
-### Phase 2: 音频通路 (1 周)
+### Phase 2: 音频通路 (10h)
 
 - [ ] ESP32 I2S 麦克风采集
 - [ ] ESP32 Opus 编码
 - [ ] PC 端 Opus 解码
 - [ ] PC 端音频录制测试
 
-### Phase 3: 云端 AI 集成 (1 周)
+### Phase 3: 云端 AI 集成 (10h)
 
 - [ ] Python ASR 接口 (Whisper 等)
 - [ ] Python LLM 接口 (Claude/OpenAI)
 - [ ] Agent 逻辑
 - [ ] TTS 接口
 
-### Phase 4: 控制闭环 (1 周)
+### Phase 4: 控制闭环 (10h)
 
 - [ ] 舵机控制指令
 - [ ] TTS 播放通路
@@ -620,16 +805,18 @@ class Agent:
 
 ## 七、配置说明
 
-### 7.1 ESP32 配置
+### 7.1 Watcher 配置
 
 ```c
 // wifi_config.h
-#define WIFI_SSID "YourSSID"
-#define WIFI_PASSWORD "YourPassword"
+#define WIFI_SSID "YourSSID"          // 可通过 NVS 覆盖
 #define WS_SERVER_URL "ws://192.168.1.100:8766"
+
+// 推荐: 使用 NVS 存储 WiFi 密码 (见第十章安全设计)
+// #include "wifi_nvs.h"  // 自定义组件存储凭证
 ```
 
-### 7.2 PC 配置
+### 7.2 Cloud 配置
 
 ```python
 # config.py
@@ -650,7 +837,224 @@ class Config:
 
 ---
 
-## 八、注意事项
+## 编译与烧录环境
+
+### 7.1 Watcher 开发环境
+
+#### 软件要求
+
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| ESP-IDF | v5.2+ | 官方 SDK |
+| Python | 3.8+ | 构建工具 |
+| CMake | 3.16+ | 构建系统 |
+| Ninja | 1.10+ | 构建加速 |
+
+#### 硬件要求
+
+| 设备 | 说明 |
+|------|------|
+| USB 串口驱动 | CH340/CP2102 |
+| USB 数据线 | 支持数据通信 |
+| 杜邦线 | 连接 ESP32-MCU |
+
+#### 安装步骤
+
+```bash
+# 1. 克隆 ESP-IDF
+git clone -b v5.2.1 --recursive https://github.com/espressif/esp-idf.git
+cd esp-idf
+./install.sh esp32s3
+
+# 2. 激活环境 (Windows)
+.\env.ps1
+
+# 3. 进入项目目录
+cd MVP-W/firmware/s3
+
+# 4. 设置目标芯片
+idf.py set-target esp32s3
+
+# 5. 配置项目
+idf.py menuconfig
+# 需要启用:
+# - PSRAM
+# - WiFi
+# - WebSocket
+# - I2S
+
+# 6. 编译
+idf.py build
+
+# 7. 烧录 (Windows COM 口)
+idf.py -p COM3 flash monitor
+
+# 8. 监视日志
+idf.py -p COM3 monitor
+```
+
+#### 注意事项
+
+- **GPIO 19/20**: 烧录时需断开与 ESP32-MCU 的连接，否则会干扰烧录
+- **分区表**: 使用默认 `singleapp` 分区，或自定义 `nvs` + `app` + `spiffs`
+- **PSRAM**: 建议启用以支持音频缓冲区
+
+---
+
+### 7.2 MCU 开发环境
+
+#### 软件要求
+
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| ESP-IDF | v5.2+ | 同主控 |
+| Python | 3.8+ | 构建工具 |
+
+#### 硬件连接
+
+```
+ESP32-S3 (主控)          ESP32-MCU (身体)
+─────────────            ──────────────
+GPIO 19 (TX)   ───────►  GPIO 20 (RX)
+GPIO 20 (RX)  ◄───────   GPIO 19 (TX)
+GND           ───────►   GND
+```
+
+#### 编译与烧录
+
+```bash
+# 1. 进入 MCU 项目
+cd MVP-W/firmware/mcu
+
+# 2. 设置目标芯片
+idf.py set-target esp32
+
+# 3. 编译
+idf.py build
+
+# 4. 烧录 (Windows COM 口)
+idf.py -p COM4 flash monitor
+```
+
+#### 注意事项
+
+- **波特率**: UART 通信使用 115200
+- **舵机 PWM**: GPIO 12 (X轴), GPIO 13 (Y轴)
+- **独立供电**: 舵机可能需要外部 5V 供电
+
+---
+
+### 7.3 Cloud 开发环境
+
+#### 软件要求
+
+| 软件 | 版本 | 说明 |
+|------|------|------|
+| Python | 3.9+ | 运行环境 |
+| pip | 21.0+ | 包管理 |
+| FFmpeg | latest | 音频处理 |
+
+#### 依赖安装
+
+```bash
+# 进入服务器目录
+cd MVP-W/server
+
+# 创建虚拟环境 (推荐)
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# 或
+.\venv\Scripts\activate  # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+```
+
+#### 运行服务器
+
+```bash
+# 启动 WebSocket 服务器
+python main.py
+
+# 或指定端口
+python main.py --host 0.0.0.0 --port 8766
+
+# 参数说明:
+# --host: 监听地址 (默认 0.0.0.0)
+# --port: 监听端口 (默认 8766)
+# --debug: 调试模式
+```
+
+---
+
+## 九、可靠性设计
+
+### 9.1 看门狗 (Watchdog)
+
+Watcher 需启用硬件看门狗，防止固件死锁：
+
+```c
+// app_main.c
+#include "esp_task_wdt.h"
+
+void app_main() {
+    // 初始化看门狗 (30秒超时)
+    esp_task_wdt_init(30, true);
+    esp_task_wdt_add(NULL);
+
+    // 主循环中定期喂狗
+    while (1) {
+        // ... 业务逻辑
+        esp_task_wdt_reset();  // 喂狗
+    }
+}
+```
+
+### 9.2 WebSocket 重连机制
+
+```c
+// ws_client.c
+static TaskHandle_t reconnect_task_handle = NULL;
+
+void ws_start_reconnect_task() {
+    if (reconnect_task_handle == NULL) {
+        xTaskCreate(ws_reconnect_task, "ws_reconnect", 4096, NULL, 5, &reconnect_task_handle);
+    }
+}
+
+void ws_reconnect_task(void *param) {
+    while (!ws_is_connected()) {
+        ESP_LOGI(TAG, "尝试重新连接 WebSocket...");
+        esp_ws_connect();
+        vTaskDelay(pdMS_TO_TICKS(5000));  // 5秒重试
+    }
+    vTaskDelete(NULL);
+}
+```
+
+### 9.3 异常日志
+
+```c
+#include "esp_log.h"
+#include "esp_system.h"
+
+void esp_restart(void) __attribute__((noreturn));
+
+void handle_crash() {
+    esp_reset_reason_t reason = esp_reset_reason();
+    ESP_LOGE(TAG, "系统重启原因: %d", reason);
+
+    // 输出崩溃前的状态
+    ESP_LOGI(TAG, "Free heap: %lu", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Min free heap: %lu", esp_get_minimum_free_heap_size());
+
+    esp_restart();
+}
+```
+
+---
+
+## 十、注意事项
 
 1. **网络要求**: ESP32 和 PC 需要在同一局域网
 2. **延迟**: WebSocket 传输有 100-200ms 延迟
@@ -659,5 +1063,5 @@ class Config:
 
 ---
 
-*文档版本: 1.0*
+*文档版本: 2.0*
 *创建日期: 2026-02-26*
