@@ -1,5 +1,6 @@
 # Build artifacts
 build/
+**/test_host/build/
 *.bin
 *.elf
 *.map
