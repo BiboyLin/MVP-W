@@ -22,8 +22,9 @@
 - **所有的动态内存分配 (`malloc`, `cJSON_Parse`) 必须有对应的释放逻辑**，并在 Unity 测试中通过自定义的内存分配器跟踪内存泄漏
 - **遇到无法在 Host 端 Mock 的底层强耦合逻辑时，立即停止执行并向我询问，严禁强行硬编码**
 - **安全红线**：
-  - 严禁硬编码 WiFi 密码或 API Keys 到固件中（使用 NVS 存储）
-  - 必须使用加密通信（WSS/MQTTS），生产环境禁止明文 HTTP
+  - MVP 阶段 WiFi 凭证允许硬编码（`wifi_config.h`），但 API Keys 严禁硬编码
+  - MVP 阶段使用明文 WebSocket (ws://)，生产版本必须升级为 WSS
+  - 生产版本严禁硬编码 WiFi 密码（改用 NVS 存储）
   - 设备离线时需实现 Device Shadow（设备影子）同步状态
   - 必须实现 Last Will and Testament (LWT) 检测意外断连
   - 考虑低功耗场景时使用 Deep Sleep 循环
@@ -130,8 +131,8 @@ MVP-W/
 
 | GPIO | 功能 | 说明 |
 |------|------|------|
-| GPIO 1 | UART TX | 发送响应 → S3 RX |
-| GPIO 3 | UART RX | 接收指令 ← S3 TX |
+| GPIO 17 | UART TX | 发送响应 → S3 RX |
+| GPIO 16 | UART RX | 接收指令 ← S3 TX |
 | GPIO 12 | 舵机 X 轴 | PWM 输出 (左右 0-180°) |
 | GPIO 13 | 舵机 Y 轴 | PWM 输出 (上下 0-180°) |
 | GPIO 2 | LED | 状态指示灯 |
@@ -141,8 +142,8 @@ MVP-W/
 ```
 ESP32-S3 (主控)          ESP32-MCU (身体)
 ─────────────────       ─────────────────
-GPIO 19 (TX)  ─────────► GPIO 3 (RX)
-GPIO 20 (RX)  ◄───────── GPIO 1 (TX)
+GPIO 19 (TX)  ─────────► GPIO 16 (RX)
+GPIO 20 (RX)  ◄───────── GPIO 17 (TX)
 GND         ───────────► GND
 ```
 
@@ -174,11 +175,12 @@ GND         ───────────► GND
     "data": "<base64 encoded opus>"
 }
 
-// 文字显示
+// 文字显示 + 表情 (emoji 和 size 均为可选字段)
 {
     "type": "display",
     "text": "你好",
-    "size": 24
+    "emoji": "happy",   // 可选: happy/sad/surprised/angry/normal
+    "size": 24          // 可选: 字体大小 (默认 24)
 }
 
 // 拍照请求
@@ -292,8 +294,8 @@ firmware/mcu/main/
 │   - main_loop()
 │
 ├── uart_handler.c          # UART 指令处理
-│   ├── uart_init()         # UART2 初始化
-│   └── process_cmd()       # 指令解析 (JSON → X/Y 角度)
+│   ├── uart_init()         # UART2 初始化 (GPIO 16 RX / GPIO 17 TX)
+│   └── process_cmd()       # 指令解析; X/Y 缓存后原子执行，避免中间姿态
 │
 └── servo_control.c         # 舵机控制
     ├── ledc_init()         # LEDC 初始化 (50Hz PWM)
@@ -311,9 +313,14 @@ firmware/mcu/main/
 #define SERVO_MAX_US   2500     // 2.5ms = 180°
 
 // 角度到 PWM 转换公式
+// 周期 = 1000000µs / 50Hz = 20000µs，13位分辨率 → 8192 counts
+// 0°  : 500µs  → duty ≈ 205
+// 180°: 2500µs → duty = 1024
 uint32_t angle_to_duty(int angle) {
-    // angle: 0-180 → return: duty (0-8191)
-    return SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
+    if (angle < 0) angle = 0;
+    if (angle > 180) angle = 180;
+    uint32_t pulse_us = SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
+    return (pulse_us * (1 << SERVO_RES)) / (1000000 / SERVO_FREQ);
 }
 ```
 
@@ -642,6 +649,7 @@ void ws_reconnect_task(void *param) {
         esp_ws_connect();
         vTaskDelay(pdMS_TO_TICKS(5000));  // 5 秒重试
     }
+    reconnect_task_handle = NULL;  // 清除句柄，允许下次断线时重新创建
     vTaskDelete(NULL);
 }
 ```

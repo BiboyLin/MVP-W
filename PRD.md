@@ -105,7 +105,7 @@
 │   │                          │                                    │
 │   │  ┌────────────────────┐ │                                    │
 │   │  │  UART 接收        │ │  ← 接收 Watcher 指令                │
-│   │  │  GPIO 1/3         │ │                                    │
+│   │  │  GPIO 16/17       │ │                                    │
 │   │  └────────┬─────────┘ │                                    │
 │   │           │            │                                    │
 │   │           ▼            │                                    │
@@ -148,8 +148,8 @@
 
 | GPIO | 功能 | 说明 |
 |------|------|------|
-| GPIO 1 | UART TX | 发送响应 (→ S3 RX) |
-| GPIO 3 | UART RX | 接收 Watcher 指令 (← S3 TX) |
+| GPIO 17 | UART TX | 发送响应 (→ S3 RX) |
+| GPIO 16 | UART RX | 接收 Watcher 指令 (← S3 TX) |
 | GPIO 12 | 舵机 X 轴 | PWM 输出 |
 | GPIO 13 | 舵机 Y 轴 | PWM 输出 |
 | GPIO 2 | LED 状态 | 指示灯 |
@@ -165,10 +165,10 @@ Cloud (PC)                 Watcher (S3)              MCU
 {"type": "servo", "x": 90, "y": 45}  ──────►  X:90\r\nY:45\r\n
 
 TTS 播放 (PC → Watcher):
-{"type": "tts", "text": "你好"}  ──► 音频播放
+{"type": "tts", "format": "opus", "data": "<base64_opus>"}  ──► Opus 解码 → I2S 播放
 
 屏幕显示 (PC → Watcher):
-{"type": "display", "text": "你好", "emoji": "happy"}
+{"type": "display", "text": "你好", "emoji": "happy", "size": 24}
 
 媒体流:
 Opus Audio ◄─────────────────────► Opus Audio
@@ -235,15 +235,15 @@ MCU Firmware
 │   ├── main.c                 # 入口 + 核心逻辑
 │   │
 │   ├── uart_handler.c         # UART 指令处理
-│   │   ├── uart_init()       # UART2 初始化
-│   │   └── process_cmd()      # 指令解析
+│   │   ├── uart_init()       # UART2 初始化 (GPIO 16/17)
+│   │   └── process_cmd()      # 指令解析; X/Y 需缓存后原子执行，避免中间姿态
 │   │
 │   ├── servo_control.c        # 舵机控制
 │   │   ├── ledc_init()       # LEDC 初始化
 │   │   ├── set_angle()       # 设置角度
 │   │   └── smooth_move()     # 平滑移动
 │   │
-│   └── bt_state.c            # 状态指示
+│   └── led_indicator.c       # LED 状态指示
 │
 └── CMakeLists.txt
 ```
@@ -398,15 +398,17 @@ Cloud Backend (MVP-W-Server)
 class MessageType:
     # 控制指令 (Cloud → Watcher)
     SERVO_CONTROL = "servo"        # 舵机控制
-    TTS_PLAY = "tts"              # 语音播放
-    DISPLAY_TEXT = "display"       # 显示文字
+    TTS_PLAY = "tts"              # 语音播放 (opus 音频流)
+    DISPLAY_TEXT = "display"       # 显示文字 + 表情
     DISPLAY_IMAGE = "display_image" # 显示图像
+    CAPTURE = "capture"           # 拍照请求
     GET_SENSOR = "get_sensor"     # 获取传感器
     STATUS = "status"             # 状态反馈 (AI 思考中/回复中)
     REBOOT = "reboot"             # 重启
 
     # 媒体流 (Watcher → Cloud)
     AUDIO_STREAM = "audio"        # 音频流
+    AUDIO_END = "audio_end"       # 录音结束标记
     VIDEO_STREAM = "video"        # 视频流
     SENSOR_DATA = "sensor"         # 传感器数据
 
@@ -434,11 +436,12 @@ class MessageType:
     "data": "<base64 encoded opus>"
 }
 
-// 文字显示
+// 文字显示 + 表情 (emoji 和 size 均为可选字段)
 {
     "type": "display",
     "text": "你好",
-    "size": 24
+    "emoji": "happy",   // 可选: happy/sad/surprised/angry/normal
+    "size": 24          // 可选: 字体大小 (默认 24)
 }
 
 // 拍照请求
@@ -465,12 +468,17 @@ class MessageType:
 #### 3.1.3 媒体流 (Watcher → Cloud)
 
 ```json
-// 音频流
+// 音频流 (录音期间持续发送)
 {
     "type": "audio",
     "format": "opus",
     "sample_rate": 16000,
     "data": "<base64 encoded opus>"
+}
+
+// 录音结束标记 (松开按钮/唤醒词超时后发送一次)
+{
+    "type": "audio_end"
 }
 
 // 视频流 (JPEG)
@@ -582,10 +590,14 @@ PC Server                              ESP32 Client
 #define SERVO_MAX_US   2500     // 2.5ms = 180°
 
 // 角度到 PWM 转换
+// 周期 = 1000000µs / 50Hz = 20000µs，13位分辨率 → 8192 counts
+// 0°  : 500µs  → duty = 500  * 8192 / 20000 ≈ 205
+// 180°: 2500µs → duty = 2500 * 8192 / 20000 = 1024
 uint32_t angle_to_duty(int angle) {
-    // angle: 0-180
-    // return: duty (0-8191)
-    return SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
+    if (angle < 0) angle = 0;
+    if (angle > 180) angle = 180;
+    uint32_t pulse_us = SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
+    return (pulse_us * (1 << SERVO_RES)) / (1000000 / SERVO_FREQ);
 }
 ```
 
@@ -794,10 +806,13 @@ class Agent:
 
 | 模块 | 文件 | 说明 |
 |------|------|------|
-| ESP32 入口 | `firmware/main/app_main.c` | 系统初始化 |
-| WS 客户端 | `firmware/main/ws_client.c` | 通信核心 |
-| 音频 pipeline | `firmware/main/audio_pipeline.c` | 音视频处理 |
-| 舵机控制 | `firmware/main/servo_control.c` | 运动控制 |
+| S3 入口 | `firmware/s3/main/app_main.c` | 系统初始化 |
+| WS 客户端 | `firmware/s3/main/ws_client.c` | 通信核心 |
+| 音频 pipeline | `firmware/s3/main/audio_pipeline.c` | 音视频处理 |
+| UART 转发 | `firmware/s3/main/uart_bridge.c` | 转发指令到 MCU |
+| MCU 入口 | `firmware/mcu/main/main.c` | 舵机控制入口 |
+| 舵机控制 | `firmware/mcu/main/servo_control.c` | PWM 控制 |
+| UART 处理 | `firmware/mcu/main/uart_handler.c` | 指令解析 |
 | PC 服务器 | `server/websocket_server.py` | 云端入口 |
 | Agent | `server/ai/agent.py` | AI 逻辑 |
 
@@ -808,12 +823,10 @@ class Agent:
 ### 7.1 Watcher 配置
 
 ```c
-// wifi_config.h
-#define WIFI_SSID "YourSSID"          // 可通过 NVS 覆盖
+// wifi_config.h  (MVP 阶段使用硬编码，便于快速迭代)
+#define WIFI_SSID     "YourSSID"
+#define WIFI_PASSWORD "YourPassword"
 #define WS_SERVER_URL "ws://192.168.1.100:8766"
-
-// 推荐: 使用 NVS 存储 WiFi 密码 (见第十章安全设计)
-// #include "wifi_nvs.h"  // 自定义组件存储凭证
 ```
 
 ### 7.2 Cloud 配置
@@ -837,9 +850,9 @@ class Config:
 
 ---
 
-## 编译与烧录环境
+## 八、编译与烧录环境
 
-### 7.1 Watcher 开发环境
+### 8.1 Watcher 开发环境
 
 #### 软件要求
 
@@ -901,7 +914,7 @@ idf.py -p COM3 monitor
 
 ---
 
-### 7.2 MCU 开发环境
+### 8.2 MCU 开发环境
 
 #### 软件要求
 
@@ -915,8 +928,8 @@ idf.py -p COM3 monitor
 ```
 ESP32-S3 (主控)          ESP32-MCU (身体)
 ─────────────            ──────────────
-GPIO 19 (TX)   ───────►  GPIO 3 (RX)
-GPIO 20 (RX)  ◄───────   GPIO 1 (TX)
+GPIO 19 (TX)   ───────►  GPIO 16 (RX)
+GPIO 20 (RX)  ◄───────   GPIO 17 (TX)
 GND           ───────►   GND
 ```
 
@@ -944,7 +957,7 @@ idf.py -p COM4 flash monitor
 
 ---
 
-### 7.3 Cloud 开发环境
+### 8.3 Cloud 开发环境
 
 #### 软件要求
 
@@ -1028,6 +1041,7 @@ void ws_reconnect_task(void *param) {
         esp_ws_connect();
         vTaskDelay(pdMS_TO_TICKS(5000));  // 5秒重试
     }
+    reconnect_task_handle = NULL;  // 清除句柄，允许下次断线时重新创建
     vTaskDelete(NULL);
 }
 ```
