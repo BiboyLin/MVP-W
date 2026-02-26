@@ -130,8 +130,8 @@ MVP-W/
 
 | GPIO | 功能 | 说明 |
 |------|------|------|
-| GPIO 19 | UART TX | 发送响应 → S3 RX |
-| GPIO 20 | UART RX | 接收指令 ← S3 TX |
+| GPIO 1 | UART TX | 发送响应 → S3 RX |
+| GPIO 3 | UART RX | 接收指令 ← S3 TX |
 | GPIO 12 | 舵机 X 轴 | PWM 输出 (左右 0-180°) |
 | GPIO 13 | 舵机 Y 轴 | PWM 输出 (上下 0-180°) |
 | GPIO 2 | LED | 状态指示灯 |
@@ -141,8 +141,8 @@ MVP-W/
 ```
 ESP32-S3 (主控)          ESP32-MCU (身体)
 ─────────────────       ─────────────────
-GPIO 19 (TX)  ─────────► GPIO 20 (RX)
-GPIO 20 (RX)  ◄───────── GPIO 19 (TX)
+GPIO 19 (TX)  ─────────► GPIO 3 (RX)
+GPIO 20 (RX)  ◄───────── GPIO 1 (TX)
 GND         ───────────► GND
 ```
 
