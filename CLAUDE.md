@@ -530,23 +530,34 @@ python main.py --host 0.0.0.0 --port 8766
 
 这个阶段完全剥离硬件，专注于数据结构的解析和基础算法。Claude Code 可以在 Linux/Windows Host 环境下进行极速的"红 - 绿 - 重构"循环。
 
-### Task 1.1: TDD 环境初始化
+### Task 1.1: TDD 环境初始化 ✅
 
-配置 ESP-IDF 的 Host 编译目标 (idf.py set-target linux/windows)。
+Host 测试环境已验证可用，运行命令：
 
-在 watcher 和 mcu 两个工程中搭建基于 Unity 的测试脚手架。
+```bash
+# 构建（首次会自动拉取 Unity v2.5.2）
+export PATH="/c/Espressif/tools/cmake/3.24.0/bin:/c/ProgramData/mingw64/mingw64/bin:$PATH"
+cd firmware/mcu/test_host
+cmake -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
+cmake --build build
 
-### Task 1.2: MCU 运动计算层 (Math)
+# 运行所有测试
+ctest --test-dir build -V
+```
 
-实现 `servo_control.c` 中的 `angle_to_duty(int angle)`。
+结果：**21 Tests  0 Failures  (ServoMath 7 + UartProtocol 14)**
 
-**测试要求**：覆盖 0-180 度边界、越界保护，并验证返回值是否严格映射到 500us-2500us 的 PWM 占空比。
+### Task 1.2: MCU 运动计算层 (Math) ✅
 
-### Task 1.3: MCU JSON 指令解析器 (Parser)
+实现于 `servo_math.c` 的 `angle_to_duty(int angle)`。
+测试文件：`test_host/test_servo_math.c` — 7 个用例全部通过。
+覆盖：0°/90°/180° 精确值、负值夹紧、>180 夹紧、单调性、13-bit 分辨率范围。
 
-实现 `uart_handler.c` 中基于 cJSON 的解析逻辑。
+### Task 1.3: MCU UART 指令解析器 (Parser) ✅
 
-**测试要求**：输入标准的 `{"type": "servo", "x": 90, "y": 45}` 字符串，成功提取参数；输入格式错误或缺少字段的恶性 JSON，确保解析器不崩溃、无内存泄漏。
+实现于 `uart_protocol.c` 的 `parse_axis_cmd()`，解析文本格式 `X:90\r\n`（PRD 协议）。
+测试文件：`test_host/test_uart_protocol.c` — 14 个用例全部通过。
+覆盖：正常 X/Y 解析、边界 0/180、非法轴（Z/小写）、越界角度、格式错误、NULL 守卫。
 
 ### Task 1.4: Watcher WebSocket 消息路由 (Router)
 
