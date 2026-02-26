@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+*.bin
+*.elf
+*.map
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+.pytest_cache/
+__pycache__/
+
+# Python
+venv/
+*.pyc
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
