@@ -16,7 +16,7 @@
 #define TAG "HAL_BUTTON"
 
 /* IO Expander I2C config (from sensecap-watcher.h) */
-#define IO_EXPANDER_I2C_NUM     I2C_NUM_1
+#define IO_EXPANDER_I2C_NUM     I2C_NUM_0   /* Use I2C_NUM_0 (General I2C) */
 #define IO_EXPANDER_I2C_ADDR    0x24  /* PCA9535 address */
 #define IO_EXPANDER_SDA         47
 #define IO_EXPANDER_SCL         48
@@ -36,7 +36,7 @@ static bool g_i2c_initialized = false;
 /* Read button state from IO expander */
 static int read_button_state(bool *pressed)
 {
-    uint8_t data[2] = {0};
+    uint8_t data = {0};
 
     /* Read input port 0 (pins 0-7) */
     uint8_t reg = 0x00;  /* Input Port 0 register */
@@ -87,7 +87,7 @@ void hal_button_poll(void)
 
 int hal_button_init(button_callback_t callback)
 {
-    ESP_LOGI(TAG, "Initializing button via I2C IO Expander...");
+    ESP_LOGI(TAG, "Initializing button via I2C IO Expander (I2C_NUM_0)...");
 
     g_callback = callback;
     g_is_pressed = false;

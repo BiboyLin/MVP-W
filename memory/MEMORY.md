@@ -104,6 +104,12 @@ const esp_lcd_panel_io_spi_config_t io_config = SPD2010_PANEL_IO_QSPI_CONFIG(
 **警告**: GPIO 41/42 是编码器旋转引脚，不是按钮！
 按钮连接在 PCA9535 IO 扩展器上 (I2C 地址 0x24, SDA=47, SCL=48)。
 
+### I2C 端口配置
+| I2C | 用途 | SDA | SCL |
+|-----|------|-----|-----|
+| **I2C_NUM_0** | General (IO 扩展器) | 47 | 48 |
+| **I2C_NUM_1** | Touch | 39 | 38 |
+
 ### 6. LVGL 线程安全
 **错误**: 在 ISR 中调用 `display_update()` 导致崩溃
 ```
