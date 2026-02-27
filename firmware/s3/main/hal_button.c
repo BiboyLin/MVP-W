@@ -23,7 +23,7 @@
 #define IO_EXPANDER_INT         2
 
 /* Button is on IO Expander pin 3 */
-#define BUTTON_PIN_MASK         (1 << 3)
+#define BUTTON_PIN_NUM         3
 
 /* Debounce time in ms */
 #define DEBOUNCE_MS             50
@@ -36,16 +36,15 @@ static bool g_i2c_initialized = false;
 /* Read button state from IO expander */
 static int read_button_state(bool *pressed)
 {
-    uint8_t data = {0};
-
-    /* Read input port 0 (pins 0-7) */
+    uint8_t data = 0;
     uint8_t reg = 0x00;  /* Input Port 0 register */
+    esp_err_t ret;
 
-    esp_err_t ret = i2c_master_write_read_device(
+    ret = i2c_master_write_read_device(
         IO_EXPANDER_I2C_NUM,
         IO_EXPANDER_I2C_ADDR,
         &reg, 1,
-        data, 1,
+        &data, 1,
         pdMS_TO_TICKS(100)
     );
 
@@ -54,8 +53,12 @@ static int read_button_state(bool *pressed)
         return -1;
     }
 
-    /* Button is active low (0 = pressed) */
-    *pressed = !(data[0] & BUTTON_PIN_MASK);
+    /* Button is active low (0 = pressed) on pin 3 */
+    if (data & (1 << BUTTON_PIN_NUM)) {
+        *pressed = false;  /* Bit is 1 = not pressed */
+    } else {
+        *pressed = true;   /* Bit is 0 = pressed */
+    }
     return 0;
 }
 
