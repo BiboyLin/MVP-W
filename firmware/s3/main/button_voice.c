@@ -162,17 +162,18 @@ int voice_recorder_tick(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* Private: Button callback (called from ISR)                          */
+/* Private: Button callback (called from task context via poll)        */
 /* ------------------------------------------------------------------ */
 
 static void button_callback(bool pressed)
 {
-    /* This is called from ISR context, so we use a simple flag */
-    /* The task will process the event */
+    /* This is called from task context (via hal_button_poll) */
     if (pressed) {
+        ESP_LOGI(TAG, "Button PRESSED - starting recording");
         voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
         display_update("Recording...", "normal", 0, NULL);
     } else {
+        ESP_LOGI(TAG, "Button RELEASED - stopping recording");
         voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
         display_update("Processing...", "thinking", 0, NULL);
     }
@@ -193,6 +194,9 @@ static void voice_recorder_task(void *arg)
     ESP_LOGI(TAG, "Voice recorder task started");
 
     while (g_task_running) {
+        /* Poll button state (I2C read, safe in task context) */
+        hal_button_poll();
+
         /* Process audio encoding/sending if recording */
         voice_recorder_tick();
 

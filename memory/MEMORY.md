@@ -94,5 +94,28 @@ const esp_lcd_panel_io_spi_config_t io_config = SPD2010_PANEL_IO_QSPI_CONFIG(
 | I2S DOUT (Speaker) | 15 |
 | I2S DIN (Mic) | 16 |
 
+### 编码器与按钮 (重要!)
+| 功能 | GPIO/引脚 | 说明 |
+|------|----------|------|
+| **编码器 A 相** | GPIO 41 | 旋转检测 |
+| **编码器 B 相** | GPIO 42 | 旋转检测 |
+| **按钮** | IO_EXPANDER_PIN_3 | **通过 I2C IO 扩展器!** |
+
+**警告**: GPIO 41/42 是编码器旋转引脚，不是按钮！
+按钮连接在 PCA9535 IO 扩展器上 (I2C 地址 0x24, SDA=47, SCL=48)。
+
+### 6. LVGL 线程安全
+**错误**: 在 ISR 中调用 `display_update()` 导致崩溃
+```
+abort() was called at PC 0x40376f7f
+```
+
+**原因**: LVGL 不是线程安全的，不能在中断上下文中调用。
+
+**解决**:
+- 在任务上下文中轮询按钮状态
+- 使用队列将事件从 ISR 传递到任务
+- 所有 LVGL 操作必须在任务中执行
+
 ---
 *更新时间: 2026-02-27*

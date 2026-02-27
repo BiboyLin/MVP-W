@@ -1,91 +1,133 @@
 /**
  * HAL Button Driver for MVP-W
- * Encoder button on GPIO 41 (active low)
+ *
+ * NOTE: The button is connected via I2C IO Expander (PCA9535), not direct GPIO!
+ * GPIO 41/42 are for encoder rotation (A/B phases).
+ *
+ * For MVP, we use polling mode via I2C IO expander.
  */
 #include "hal_button.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "driver/gpio.h"
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #define TAG "HAL_BUTTON"
 
-/* Encoder button GPIO (from sensecap-watcher.h) */
-#define BUTTON_GPIO     41
+/* IO Expander I2C config (from sensecap-watcher.h) */
+#define IO_EXPANDER_I2C_NUM     I2C_NUM_1
+#define IO_EXPANDER_I2C_ADDR    0x24  /* PCA9535 address */
+#define IO_EXPANDER_SDA         47
+#define IO_EXPANDER_SCL         48
+#define IO_EXPANDER_INT         2
+
+/* Button is on IO Expander pin 3 */
+#define BUTTON_PIN_MASK         (1 << 3)
 
 /* Debounce time in ms */
-#define DEBOUNCE_MS     50
+#define DEBOUNCE_MS             50
 
 static button_callback_t g_callback = NULL;
 static bool g_is_pressed = false;
-static int64_t g_last_irq_time = 0;
+static int64_t g_last_change_time = 0;
+static bool g_i2c_initialized = false;
 
-static void IRAM_ATTR button_isr_handler(void *arg)
+/* Read button state from IO expander */
+static int read_button_state(bool *pressed)
 {
-    (void)arg;
-    int64_t now = esp_timer_get_time() / 1000;  /* Convert to ms */
+    uint8_t data[2] = {0};
 
-    /* Debounce */
-    if (now - g_last_irq_time < DEBOUNCE_MS) {
+    /* Read input port 0 (pins 0-7) */
+    uint8_t reg = 0x00;  /* Input Port 0 register */
+
+    esp_err_t ret = i2c_master_write_read_device(
+        IO_EXPANDER_I2C_NUM,
+        IO_EXPANDER_I2C_ADDR,
+        &reg, 1,
+        data, 1,
+        pdMS_TO_TICKS(100)
+    );
+
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "I2C read failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
+
+    /* Button is active low (0 = pressed) */
+    *pressed = !(data[0] & BUTTON_PIN_MASK);
+    return 0;
+}
+
+/* Poll button state (called from task context) */
+void hal_button_poll(void)
+{
+    bool current_pressed;
+    if (read_button_state(&current_pressed) != 0) {
         return;
     }
-    g_last_irq_time = now;
 
-    /* Read current level (active low: 0 = pressed) */
-    int level = gpio_get_level(BUTTON_GPIO);
-    g_is_pressed = (level == 0);
+    int64_t now = esp_timer_get_time() / 1000;  /* ms */
 
-    /* Call callback outside ISR context would need a task,
-     * but for simplicity we call it directly (callback should be short) */
-    if (g_callback) {
-        g_callback(g_is_pressed);
+    /* Check for state change with debounce */
+    if (current_pressed != g_is_pressed) {
+        if (now - g_last_change_time >= DEBOUNCE_MS) {
+            g_is_pressed = current_pressed;
+            g_last_change_time = now;
+
+            ESP_LOGI(TAG, "Button %s", g_is_pressed ? "PRESSED" : "RELEASED");
+
+            /* Call callback (safe for task context) */
+            if (g_callback) {
+                g_callback(g_is_pressed);
+            }
+        }
     }
 }
 
 int hal_button_init(button_callback_t callback)
 {
-    ESP_LOGI(TAG, "Initializing button on GPIO %d", BUTTON_GPIO);
+    ESP_LOGI(TAG, "Initializing button via I2C IO Expander...");
 
     g_callback = callback;
     g_is_pressed = false;
-    g_last_irq_time = 0;
+    g_last_change_time = 0;
 
-    /* Configure GPIO */
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << BUTTON_GPIO),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_ANYEDGE,  /* Interrupt on both edges */
-    };
+    /* Initialize I2C if not already done */
+    if (!g_i2c_initialized) {
+        i2c_config_t i2c_conf = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = IO_EXPANDER_SDA,
+            .scl_io_num = IO_EXPANDER_SCL,
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 400000,
+        };
 
-    esp_err_t ret = gpio_config(&io_conf);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "GPIO config failed: %s", esp_err_to_name(ret));
-        return -1;
-    }
+        esp_err_t ret = i2c_param_config(IO_EXPANDER_I2C_NUM, &i2c_conf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "I2C config failed: %s", esp_err_to_name(ret));
+            return -1;
+        }
 
-    /* Install ISR service if not already installed */
-    ret = gpio_install_isr_service(0);
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        /* ESP_ERR_INVALID_STATE means already installed, which is OK */
-        ESP_LOGE(TAG, "ISR service install failed: %s", esp_err_to_name(ret));
-        return -1;
-    }
+        ret = i2c_driver_install(IO_EXPANDER_I2C_NUM, I2C_MODE_MASTER, 0, 0, 0);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "I2C driver install failed: %s", esp_err_to_name(ret));
+            return -1;
+        }
 
-    /* Add ISR handler */
-    ret = gpio_isr_handler_add(BUTTON_GPIO, button_isr_handler, NULL);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "ISR handler add failed: %s", esp_err_to_name(ret));
-        return -1;
+        g_i2c_initialized = true;
+        ESP_LOGI(TAG, "I2C initialized (SDA=%d, SCL=%d)", IO_EXPANDER_SDA, IO_EXPANDER_SCL);
     }
 
     /* Read initial state */
-    g_is_pressed = (gpio_get_level(BUTTON_GPIO) == 0);
+    if (read_button_state(&g_is_pressed) == 0) {
+        ESP_LOGI(TAG, "Button initialized, initial state: %s",
+                 g_is_pressed ? "pressed" : "released");
+    } else {
+        ESP_LOGW(TAG, "Button initialized but read failed");
+    }
 
-    ESP_LOGI(TAG, "Button initialized, initial state: %s",
-             g_is_pressed ? "pressed" : "released");
     return 0;
 }
 
@@ -96,7 +138,6 @@ bool hal_button_is_pressed(void)
 
 void hal_button_deinit(void)
 {
-    gpio_isr_handler_remove(BUTTON_GPIO);
-    gpio_reset_pin(BUTTON_GPIO);
     g_callback = NULL;
+    /* Don't uninstall I2C - may be used by other components */
 }

@@ -24,6 +24,12 @@ int hal_button_init(button_callback_t callback);
 bool hal_button_is_pressed(void);
 
 /**
+ * Poll button state (call from task context)
+ * This reads the button via I2C and calls callback on change
+ */
+void hal_button_poll(void);
+
+/**
  * Deinitialize button GPIO
  */
 void hal_button_deinit(void);
