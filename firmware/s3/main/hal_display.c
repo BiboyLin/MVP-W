@@ -4,6 +4,7 @@
  */
 #include "hal_display.h"
 #include "esp_log.h"
+#include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "driver/spi_master.h"
 #include "driver/ledc.h"
