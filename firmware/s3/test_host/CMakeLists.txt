@@ -13,36 +13,43 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(Unity)
 
-# Source files (pure logic, no ESP-IDF dependencies)
-set(SOURCES
-    ../main/ws_router.c
-    ../main/cJSON.c
-)
-
-# Test files
-set(TEST_SOURCES
-    test_ws_router.c
-)
-
-# Executable
-add_executable(test_runner
-    ${SOURCES}
-    ${TEST_SOURCES}
-)
-
-target_include_directories(test_runner PRIVATE
+# Common include directories
+set(INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/../main
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${unity_SOURCE_DIR}/src
 )
 
-target_link_libraries(test_runner PRIVATE unity)
+# ------------------------------------------------------------------ #
+# Test: WS Router
+# ------------------------------------------------------------------ #
+add_executable(test_ws_router
+    ../main/ws_router.c
+    ../main/cJSON.c
+    test_ws_router.c
+)
+target_include_directories(test_ws_router PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(test_ws_router PRIVATE unity)
 
+# ------------------------------------------------------------------ #
+# Test: UART Bridge
+# ------------------------------------------------------------------ #
+add_executable(test_uart_bridge
+    ../uart_bridge.c
+    test_uart_bridge.c
+)
+target_include_directories(test_uart_bridge PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(test_uart_bridge PRIVATE unity)
+
+# ------------------------------------------------------------------ #
 # CTest
+# ------------------------------------------------------------------ #
 enable_testing()
-add_test(NAME WS_Router COMMAND test_runner)
+add_test(NAME WS_Router    COMMAND test_ws_router)
+add_test(NAME UART_Bridge  COMMAND test_uart_bridge)
 
-# Add memory check target (optional, requires valgrind)
-add_custom_target(memcheck
-    COMMAND valgrind --leak-check=full --error-exitcode=1 $<TARGET_FILE:test_runner>
-    DEPENDS test_runner
+# Run all tests
+add_custom_target(test_all
+    COMMAND ctest --output-on-failure
+    DEPENDS test_ws_router test_uart_bridge
 )
