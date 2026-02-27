@@ -54,7 +54,7 @@ int ws_client_init(void)
 {
     esp_websocket_client_config_t cfg = {
         .uri = WS_SERVER_URL,
-        .timeout_ms = WS_TIMEOUT_MS,
+        .network_timeout_ms = WS_TIMEOUT_MS,
         .buffer_size = 4096,
     };
 
