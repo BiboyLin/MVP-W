@@ -8,7 +8,8 @@
 #define TAG "WS_CLIENT"
 
 /* WebSocket configuration (MVP: hardcoded) */
-#define WS_SERVER_URL  "ws://192.168.1.100:8766"
+#define WS_SERVER_URL  "ws://192.168.31.10:8766"
+/*Erroright Bob-main*/
 #define WS_TIMEOUT_MS  10000
 
 static esp_websocket_client_handle_t ws_client = NULL;

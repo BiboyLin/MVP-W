@@ -124,6 +124,12 @@ void app_main(void)
     /* 3. Initialize voice recorder */
     voice_recorder_init();
 
+    /* 3.5 Start voice recorder (button + task) */
+    if (voice_recorder_start() != 0) {
+        ESP_LOGE(TAG, "Voice recorder start failed");
+        /* Continue anyway - may work later */
+    }
+
     /* 4. Initialize and connect to WiFi */
     display_update("Connecting WiFi...", "normal", 0, NULL);
     wifi_init();  /* Initialize WiFi driver */

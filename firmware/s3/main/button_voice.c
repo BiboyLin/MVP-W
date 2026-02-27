@@ -1,8 +1,15 @@
 #include "button_voice.h"
 #include "hal_audio.h"
 #include "hal_opus.h"
+#include "hal_button.h"
 #include "ws_client.h"
+#include "display_ui.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
+
+#define TAG "VOICE"
 
 /* ------------------------------------------------------------------ */
 /* Private: State and statistics                                       */
@@ -152,4 +159,95 @@ int voice_recorder_tick(void)
 
     g_stats.encode_count++;
     return 1;  /* One frame encoded and sent */
+}
+
+/* ------------------------------------------------------------------ */
+/* Private: Button callback (called from ISR)                          */
+/* ------------------------------------------------------------------ */
+
+static void button_callback(bool pressed)
+{
+    /* This is called from ISR context, so we use a simple flag */
+    /* The task will process the event */
+    if (pressed) {
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
+        display_update("Recording...", "normal", 0, NULL);
+    } else {
+        voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+        display_update("Processing...", "thinking", 0, NULL);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Private: Voice recorder task                                        */
+/* ------------------------------------------------------------------ */
+
+static TaskHandle_t g_voice_task_handle = NULL;
+static volatile bool g_task_running = false;
+
+/* Tick interval: 60ms for Opus frame size */
+#define TICK_INTERVAL_MS    60
+
+static void voice_recorder_task(void *arg)
+{
+    ESP_LOGI(TAG, "Voice recorder task started");
+
+    while (g_task_running) {
+        /* Process audio encoding/sending if recording */
+        voice_recorder_tick();
+
+        vTaskDelay(pdMS_TO_TICKS(TICK_INTERVAL_MS));
+    }
+
+    g_voice_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Start voice recorder system (with button and task)         */
+/* ------------------------------------------------------------------ */
+
+int voice_recorder_start(void)
+{
+    /* Initialize button */
+    if (hal_button_init(button_callback) != 0) {
+        ESP_LOGE(TAG, "Button init failed");
+        return -1;
+    }
+
+    /* Start voice recorder task */
+    g_task_running = true;
+    BaseType_t ret = xTaskCreate(
+        voice_recorder_task,
+        "voice_task",
+        4096,
+        NULL,
+        5,
+        &g_voice_task_handle
+    );
+
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Task create failed");
+        g_task_running = false;
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "Voice recorder started");
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Stop voice recorder system                                  */
+/* ------------------------------------------------------------------ */
+
+void voice_recorder_stop(void)
+{
+    g_task_running = false;
+
+    if (g_voice_task_handle) {
+        vTaskDelay(pdMS_TO_TICKS(100));  /* Wait for task to exit */
+    }
+
+    hal_button_deinit();
+    ESP_LOGI(TAG, "Voice recorder stopped");
 }

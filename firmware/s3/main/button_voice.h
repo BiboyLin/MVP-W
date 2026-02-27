@@ -59,6 +59,18 @@ void voice_recorder_get_stats(voice_stats_t *out_stats);
  */
 void voice_recorder_reset_stats(void);
 
+/**
+ * Start voice recorder system (button + task)
+ * This initializes the button and starts the recorder task
+ * @return 0 on success, -1 on error
+ */
+int voice_recorder_start(void);
+
+/**
+ * Stop voice recorder system
+ */
+void voice_recorder_stop(void);
+
 /* ------------------------------------------------------------------ */
 /* HAL Interface (to be implemented by hardware/audio layer)          */
 /* ------------------------------------------------------------------ */

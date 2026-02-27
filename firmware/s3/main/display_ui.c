@@ -69,6 +69,9 @@ emoji_type_t display_emoji_from_string(const char *emoji_str)
     if (strcasecmp_local(emoji_str, "normal") == 0) {
         return EMOJI_NORMAL;
     }
+    if (strcasecmp_local(emoji_str, "thinking") == 0) {
+        return EMOJI_THINKING;
+    }
 
     return EMOJI_UNKNOWN;
 }

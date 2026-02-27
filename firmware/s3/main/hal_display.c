@@ -312,6 +312,7 @@ int hal_display_set_emoji(int emoji_id)
         case 2: emoji_text = "T_T"; emoji_name = "sad"; break;
         case 3: emoji_text = "O_O"; emoji_name = "surprised"; break;
         case 4: emoji_text = ">_<"; emoji_name = "angry"; break;
+        case 5: emoji_text = "?_?"; emoji_name = "thinking"; break;
         default: emoji_text = "?"; break;
     }
 

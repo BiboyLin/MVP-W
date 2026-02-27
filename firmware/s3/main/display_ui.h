@@ -11,6 +11,7 @@ typedef enum {
     EMOJI_SAD,
     EMOJI_SURPRISED,
     EMOJI_ANGRY,
+    EMOJI_THINKING,
     EMOJI_COUNT,  /* Sentinel */
     EMOJI_UNKNOWN = -1,
 } emoji_type_t;
