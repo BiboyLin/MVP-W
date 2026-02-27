@@ -1,11 +1,12 @@
 /**
  * HAL Display Driver for MVP-W
- * Based on sensecap-watcher SDK, using remote registry components
+ * Using esp_lcd_spd2010 component from remote registry
  */
 #include "hal_display.h"
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
+#include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "driver/ledc.h"
 #include "esp_lcd_panel_io.h"
@@ -19,20 +20,15 @@
 
 #define TAG "HAL_DISPLAY"
 
-/* Display configuration (from sensecap-watcher.h) */
+/* Display configuration */
 #define LCD_H_RES          412
 #define LCD_V_RES          412
-#define LCD_PIXEL_CLK_HZ   (40 * 1000 * 1000)
-#define LCD_CMD_BITS       32
-#define LCD_PARAM_BITS     8
 #define LCD_BITS_PER_PIXEL 16
 
-/* SPI/QSPI GPIO (from sensecap-watcher.h) */
+/* QSPI GPIO (from sensecap-watcher.h) */
 #define LCD_SPI_NUM        SPI3_HOST
 #define LCD_SPI_CS         45
 #define LCD_GPIO_BL        8
-
-/* QSPI data lines */
 #define LCD_SPI_PCLK       7
 #define LCD_SPI_DATA0      9
 #define LCD_SPI_DATA1      1
@@ -58,13 +54,15 @@ static lv_obj_t *label_emoji = NULL;
 static bool is_initialized = false;
 static SemaphoreHandle_t lvgl_mutex = NULL;
 
-/* Forward declarations */
-static void disp_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p);
+static void disp_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p);
+static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx);
 static void lvgl_tick_task(void *arg);
 
 /* Initialize backlight PWM */
 static esp_err_t backlight_init(void)
 {
+    ESP_LOGI(TAG, "Initializing backlight PWM...");
+
     ledc_timer_config_t timer_cfg = {
         .speed_mode = LCD_LEDC_MODE,
         .duty_resolution = LCD_LEDC_DUTY_RES,
@@ -85,6 +83,7 @@ static esp_err_t backlight_init(void)
     };
     ESP_RETURN_ON_ERROR(ledc_channel_config(&ch_cfg), TAG, "LEDC channel config failed");
 
+    ESP_LOGI(TAG, "Backlight PWM initialized");
     return ESP_OK;
 }
 
@@ -94,85 +93,29 @@ static esp_err_t backlight_set(int percent)
     if (percent < 0) percent = 0;
 
     uint32_t duty = (BIT(LCD_LEDC_DUTY_RES) * percent) / 100;
-    return ledc_set_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL, duty) ||
-           ledc_update_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL);
-}
-
-/* Initialize QSPI bus */
-static esp_err_t spi_bus_init(void)
-{
-    spi_bus_config_t bus_cfg = {
-        .sclk_io_num = LCD_SPI_PCLK,
-        .mosi_io_num = LCD_SPI_DATA0,
-        .miso_io_num = -1,
-        .quadwp_io_num = LCD_SPI_DATA1,
-        .quadhd_io_num = LCD_SPI_DATA2,
-        .data4_io_num = LCD_SPI_DATA3,
-        .max_transfer_sz = LCD_H_RES * LCD_V_RES * 2,
-        .flags = SPICOMMON_BUSFLAG_QUAD,
-    };
-    return spi_bus_initialize(LCD_SPI_NUM, &bus_cfg, SPI_DMA_CH_AUTO);
-}
-
-/* Initialize LCD panel */
-static esp_err_t lcd_panel_init(void)
-{
-    /* Initialize SPI bus */
-    ESP_RETURN_ON_ERROR(spi_bus_init(), TAG, "SPI bus init failed");
-
-    /* Panel IO configuration for QSPI */
-    esp_lcd_panel_io_spi_config_t io_cfg = {
-        .cs_gpio_num = LCD_SPI_CS,
-        .dc_gpio_num = -1,
-        .spi_mode = 3,
-        .pclk_hz = LCD_PIXEL_CLK_HZ,
-        .trans_queue_depth = 10,
-        .lcd_cmd_bits = LCD_CMD_BITS,
-        .lcd_param_bits = LCD_PARAM_BITS,
-        .flags = {
-            .quad_mode = true,
-        },
-    };
-
-    spd2010_vendor_config_t vendor_cfg = {
-        .flags = {
-            .use_qspi_interface = 1,
-        },
-    };
-
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_NUM,
-                                                  &io_cfg, &panel_io), TAG, "Panel IO failed");
-
-    /* Panel configuration */
-    esp_lcd_panel_dev_config_t panel_cfg = {
-        .reset_gpio_num = -1,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
-        .bits_per_pixel = LCD_BITS_PER_PIXEL,
-        .vendor_config = &vendor_cfg,
-    };
-
-    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_spd2010(panel_io, &panel_cfg, &panel),
-                        TAG, "Panel create failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "Panel reset failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "Panel init failed");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, true), TAG, "Panel on failed");
-
-    return ESP_OK;
+    esp_err_t ret = ledc_set_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL, duty);
+    if (ret != ESP_OK) return ret;
+    return ledc_update_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL);
 }
 
 /* LVGL flush callback */
-static void disp_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
+static void disp_flush_cb(lv_disp_drv_t *drv, const lv_area_t *area, lv_color_t *color_p)
 {
-    int offsetx1 = area->x1;
-    int offsetx2 = area->x2;
-    int offsety1 = area->y1;
-    int offsety2 = area->y2;
+    esp_lcd_panel_handle_t panel_handle = (esp_lcd_panel_handle_t) drv->user_data;
+    const int offsetx1 = area->x1;
+    const int offsetx2 = area->x2;
+    const int offsety1 = area->y1;
+    const int offsety2 = area->y2;
 
-    /* Copy buffer to LCD */
-    esp_lcd_panel_draw_bitmap(panel, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1,
-                               (uint8_t *)color_p);
+    esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_p);
+}
 
-    lv_disp_flush_ready(disp);
+/* Notify LVGL flush ready callback */
+static bool notify_lvgl_flush_ready(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx)
+{
+    lv_disp_drv_t *disp_driver = (lv_disp_drv_t *)user_ctx;
+    lv_disp_flush_ready(disp_driver);
+    return false;
 }
 
 /* LVGL tick task */
@@ -197,22 +140,83 @@ int hal_display_init(void)
 
     ESP_LOGI(TAG, "Initializing display...");
 
-    /* Initialize backlight */
+    /* Step 1: Initialize backlight (set to 0 first) */
     if (backlight_init() != ESP_OK) {
         ESP_LOGE(TAG, "Backlight init failed");
         return -1;
     }
 
-    /* Initialize LCD panel */
-    if (lcd_panel_init() != ESP_OK) {
-        ESP_LOGE(TAG, "LCD panel init failed");
+    /* Step 2: Initialize SPI bus using SPD2010 macro */
+    ESP_LOGI(TAG, "Initializing QSPI bus...");
+    const spi_bus_config_t buscfg = SPD2010_PANEL_BUS_QSPI_CONFIG(
+        LCD_SPI_PCLK,
+        LCD_SPI_DATA0,
+        LCD_SPI_DATA1,
+        LCD_SPI_DATA2,
+        LCD_SPI_DATA3,
+        LCD_H_RES * LCD_V_RES * LCD_BITS_PER_PIXEL / 8
+    );
+    esp_err_t ret = spi_bus_initialize(LCD_SPI_NUM, &buscfg, SPI_DMA_CH_AUTO);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(ret));
         return -1;
     }
 
-    /* Set default brightness */
-    backlight_set(80);
+    /* Step 3: Install panel IO using SPD2010 macro */
+    ESP_LOGI(TAG, "Installing panel IO...");
+    const esp_lcd_panel_io_spi_config_t io_config = SPD2010_PANEL_IO_QSPI_CONFIG(
+        LCD_SPI_CS,
+        notify_lvgl_flush_ready,
+        &disp_drv
+    );
+    ret = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_NUM, &io_config, &panel_io);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Panel IO failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
 
-    /* Create LVGL mutex */
+    /* Step 4: Create SPD2010 panel */
+    ESP_LOGI(TAG, "Creating SPD2010 panel...");
+    spd2010_vendor_config_t vendor_config = {
+        .flags = {
+            .use_qspi_interface = 1,
+        },
+    };
+    const esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = -1,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = LCD_BITS_PER_PIXEL,
+        .vendor_config = &vendor_config,
+    };
+    ret = esp_lcd_new_panel_spd2010(panel_io, &panel_config, &panel);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Panel create failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
+
+    /* Step 5: Reset and init panel */
+    ESP_LOGI(TAG, "Resetting panel...");
+    ret = esp_lcd_panel_reset(panel);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Panel reset failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "Initializing panel...");
+    ret = esp_lcd_panel_init(panel);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Panel init failed: %s", esp_err_to_name(ret));
+        return -1;
+    }
+
+    /* Step 6: Turn on display */
+    ESP_LOGI(TAG, "Turning on display...");
+    ret = esp_lcd_panel_disp_on_off(panel, true);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Display on failed: %s", esp_err_to_name(ret));
+    }
+
+    /* Step 7: Create LVGL mutex */
     lvgl_mutex = xSemaphoreCreateMutex();
     if (!lvgl_mutex) {
         ESP_LOGE(TAG, "Failed to create mutex");
@@ -221,10 +225,11 @@ int hal_display_init(void)
 
     xSemaphoreTake(lvgl_mutex, portMAX_DELAY);
 
-    /* Initialize LVGL */
+    /* Step 8: Initialize LVGL */
+    ESP_LOGI(TAG, "Initializing LVGL...");
     lv_init();
 
-    /* Allocate buffer in PSRAM */
+    /* Step 9: Allocate buffer in PSRAM */
     lvgl_buf = heap_caps_malloc(LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t),
                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!lvgl_buf) {
@@ -236,37 +241,43 @@ int hal_display_init(void)
         xSemaphoreGive(lvgl_mutex);
         return -1;
     }
+    ESP_LOGI(TAG, "LVGL buffer allocated: %d bytes", LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t));
 
     lv_disp_draw_buf_init(&disp_buf, lvgl_buf, NULL, LCD_H_RES * LVGL_BUF_HEIGHT);
 
-    /* Initialize display driver */
+    /* Step 10: Initialize display driver */
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res = LCD_H_RES;
     disp_drv.ver_res = LCD_V_RES;
     disp_drv.flush_cb = disp_flush_cb;
     disp_drv.draw_buf = &disp_buf;
+    disp_drv.user_data = panel;
     lv_disp_drv_register(&disp_drv);
 
-    /* Create UI elements */
+    /* Step 11: Create UI elements */
     lv_obj_t *scr = lv_disp_get_scr_act(NULL);
 
     label_text = lv_label_create(scr);
     lv_obj_set_width(label_text, 380);
     lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
     lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -50);
-    lv_label_set_text(label_text, "Loading...");
+    lv_label_set_text(label_text, "Hello MVP-W!");
 
     label_emoji = lv_label_create(scr);
     lv_obj_align(label_emoji, LV_ALIGN_CENTER, 0, 50);
-    lv_label_set_text(label_emoji, "");
+    lv_label_set_text(label_emoji, "^_^");
 
     xSemaphoreGive(lvgl_mutex);
 
-    /* Start LVGL task */
+    /* Step 12: Start LVGL task */
     xTaskCreate(lvgl_tick_task, "lvgl", 4096, NULL, 5, NULL);
 
+    /* Step 13: Turn on backlight */
+    ESP_LOGI(TAG, "Setting backlight to 80%%...");
+    backlight_set(80);
+
     is_initialized = true;
-    ESP_LOGI(TAG, "Display initialized successfully");
+    ESP_LOGI(TAG, "Display initialized successfully!");
     return 0;
 }
 
