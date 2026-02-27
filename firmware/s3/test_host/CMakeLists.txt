@@ -35,7 +35,7 @@ target_link_libraries(test_ws_router PRIVATE unity)
 # Test: UART Bridge
 # ------------------------------------------------------------------ #
 add_executable(test_uart_bridge
-    ../uart_bridge.c
+    ../main/uart_bridge.c
     test_uart_bridge.c
 )
 target_include_directories(test_uart_bridge PRIVATE ${INCLUDE_DIRS})
@@ -45,7 +45,7 @@ target_link_libraries(test_uart_bridge PRIVATE unity)
 # Test: Button Voice (Audio State Machine)
 # ------------------------------------------------------------------ #
 add_executable(test_button_voice
-    ../button_voice.c
+    ../main/button_voice.c
     test_button_voice.c
 )
 target_include_directories(test_button_voice PRIVATE ${INCLUDE_DIRS})
@@ -55,7 +55,7 @@ target_link_libraries(test_button_voice PRIVATE unity)
 # Test: Display UI (LVGL State Mapping)
 # ------------------------------------------------------------------ #
 add_executable(test_display_ui
-    ../display_ui.c
+    ../main/display_ui.c
     test_display_ui.c
 )
 target_include_directories(test_display_ui PRIVATE ${INCLUDE_DIRS})
