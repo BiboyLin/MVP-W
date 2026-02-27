@@ -192,13 +192,10 @@ static volatile bool g_task_running = false;
 static void voice_recorder_task(void *arg)
 {
     ESP_LOGI(TAG, "Voice recorder task started");
-    ESP_LOGI(TAG, "Button polling disabled for MVP - use voice command or timeout");
 
     while (g_task_running) {
-        /* Button polling disabled for MVP
-         * TODO: Integrate esp_io_expander component for proper button support
-         * hal_button_poll();
-         */
+        /* Poll button state via IO expander */
+        hal_button_poll();
 
         /* Process audio encoding/sending if recording */
         voice_recorder_tick();
@@ -216,11 +213,13 @@ static void voice_recorder_task(void *arg)
 
 int voice_recorder_start(void)
 {
-    /* Button via IO expander disabled for MVP
-     * TODO: Integrate esp_io_expander component for proper button support
-     * For now, use a timer or other trigger method
-     */
-    ESP_LOGI(TAG, "Voice recorder started (button polling disabled)");
+    /* Initialize button via IO expander */
+    if (hal_button_init(button_callback) != 0) {
+        ESP_LOGE(TAG, "Button init failed");
+        /* Continue anyway - voice recording may still work via other triggers */
+    } else {
+        ESP_LOGI(TAG, "Button initialized via IO expander");
+    }
 
     /* Start voice recorder task */
     g_task_running = true;
@@ -255,6 +254,6 @@ void voice_recorder_stop(void)
         vTaskDelay(pdMS_TO_TICKS(100));  /* Wait for task to exit */
     }
 
-    /* hal_button_deinit(); -- Button disabled for MVP */
+    hal_button_deinit();
     ESP_LOGI(TAG, "Voice recorder stopped");
 }
