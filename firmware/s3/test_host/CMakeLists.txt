@@ -42,14 +42,25 @@ target_include_directories(test_uart_bridge PRIVATE ${INCLUDE_DIRS})
 target_link_libraries(test_uart_bridge PRIVATE unity)
 
 # ------------------------------------------------------------------ #
+# Test: Button Voice (Audio State Machine)
+# ------------------------------------------------------------------ #
+add_executable(test_button_voice
+    ../button_voice.c
+    test_button_voice.c
+)
+target_include_directories(test_button_voice PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(test_button_voice PRIVATE unity)
+
+# ------------------------------------------------------------------ #
 # CTest
 # ------------------------------------------------------------------ #
 enable_testing()
-add_test(NAME WS_Router    COMMAND test_ws_router)
-add_test(NAME UART_Bridge  COMMAND test_uart_bridge)
+add_test(NAME WS_Router      COMMAND test_ws_router)
+add_test(NAME UART_Bridge    COMMAND test_uart_bridge)
+add_test(NAME Button_Voice   COMMAND test_button_voice)
 
 # Run all tests
 add_custom_target(test_all
     COMMAND ctest --output-on-failure
-    DEPENDS test_ws_router test_uart_bridge
+    DEPENDS test_ws_router test_uart_bridge test_button_voice
 )
