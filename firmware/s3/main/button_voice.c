@@ -1,4 +1,7 @@
 #include "button_voice.h"
+#include "hal_audio.h"
+#include "hal_opus.h"
+#include "ws_client.h"
 #include <string.h>
 
 /* ------------------------------------------------------------------ */

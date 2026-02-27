@@ -8,6 +8,7 @@ idf_component_register(
         "hal_audio.c"
         "hal_display.c"
         "hal_uart.c"
+        "hal_opus.c"
         "wifi_client.c"
         "ws_client.c"
         "cJSON.c"

@@ -1,4 +1,5 @@
 #include "uart_bridge.h"
+#include "hal_uart.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -15,6 +16,11 @@ static uart_bridge_t g_stats = {0};
 void uart_bridge_init(void)
 {
     memset(&g_stats, 0, sizeof(g_stats));
+
+    /* Initialize HAL UART */
+    if (hal_uart_init() != 0) {
+        /* Log error but continue - may be tested separately */
+    }
 }
 
 /* ------------------------------------------------------------------ */

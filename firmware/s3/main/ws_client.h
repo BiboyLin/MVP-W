@@ -38,4 +38,18 @@ int ws_client_send_text(const char *text);
  */
 int ws_client_is_connected(void);
 
+/**
+ * Send audio data via WebSocket
+ * @param data Audio data (Opus encoded)
+ * @param len Data length
+ * @return 0 on success, -1 on error
+ */
+int ws_send_audio(const uint8_t *data, int len);
+
+/**
+ * Send audio end marker via WebSocket
+ * @return 0 on success, -1 on error
+ */
+int ws_send_audio_end(void);
+
 #endif /* WS_CLIENT_H */

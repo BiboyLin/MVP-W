@@ -1,4 +1,5 @@
 #include "display_ui.h"
+#include "hal_display.h"
 #include <string.h>
 #include <ctype.h>
 
@@ -38,6 +39,9 @@ void display_ui_init(void)
 {
     memset(g_current_text, 0, sizeof(g_current_text));
     g_current_emoji = EMOJI_NORMAL;
+
+    /* Initialize HAL display */
+    hal_display_init();
 }
 
 /* ------------------------------------------------------------------ */
