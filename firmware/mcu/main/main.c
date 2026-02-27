@@ -9,7 +9,7 @@
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "MVP-W MCU v1.0 — starting");
+    ESP_LOGI(TAG, "MVP-W MCU v1.0 starting");
 
     /* 1. Initialize peripherals */
     led_indicator_init();
@@ -19,14 +19,14 @@ void app_main(void)
     /* 2. Startup: 3 blinks = boot OK */
     led_blink(3, 200);
 
-    /* 3. Move servos to center (90°/90°) */
+    /* 3. Move servos to center (90/90) */
     servo_smooth_move(90, 90, 500);
 
     /* 4. Solid LED = ready */
     led_set(true);
 
-    ESP_LOGI(TAG, "Ready — UART2 RX:GPIO16  TX:GPIO17  115200 8N1");
-    ESP_LOGI(TAG, "Protocol: 'X:<0-180>\\r\\n'  'Y:<0-180>\\r\\n'");
+    ESP_LOGI(TAG, "Ready - UART2 RX:GPIO16 TX:GPIO17 115200 8N1");
+    ESP_LOGI(TAG, "Protocol: X:<0-180> Y:<0-180>");
 
     /* 5. Start UART listener (FreeRTOS task) */
     uart_handler_start_task();

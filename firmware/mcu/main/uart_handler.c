@@ -28,7 +28,7 @@ static void uart_rx_task(void *arg)
         for (int i = 0; i < n; i++) {
             char c = (char)raw[i];
 
-            if (c == '\n') {
+            if (c == '\n' || c == '\r') {
                 /* Complete line received — parse and dispatch */
                 line[line_len] = '\0';
                 char axis;
