@@ -1,6 +1,9 @@
 # ESP32-S3 configuration
 CONFIG_IDF_TARGET="esp32s3"
 
+# Disable component manager (use local components only)
+CONFIG_IDF_COMPONENT_MANAGER=n
+
 # PSRAM (required for audio buffers and LVGL)
 CONFIG_ESP32S3_SPIRAM_SUPPORT=y
 CONFIG_SPIRAM_MODE_OCT=y
