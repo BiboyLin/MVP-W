@@ -591,17 +591,31 @@ ctest --test-dir build -V
 
 逻辑跑通且测试覆盖率达标后，切回真实的 ESP32-S3 和 ESP32 目标芯片，补齐底层驱动。这个阶段无法完全自动化 TDD，需要你结合逻辑分析仪或示波器进行验证。
 
-### Task 3.1: MCU 舵机 PWM 驱动
+### Task 3.1: MCU 舵机 PWM 驱动 ✅
 
 实现 `servo_control.c` 中的 `ledc_init()`，将 GPIO 12 和 GPIO 13 配置为 50Hz PWM 输出。
 
-### Task 3.2: Watcher 外设大集成
+### Task 3.2: Watcher 外设大集成 ✅
 
 - **音频**：调用 sensecap-watcher SDK，打通 I2S 麦克风/喇叭与 Opus 编解码器。
 - **视觉**：调用 Himax SPI 摄像头接口，实现抓图并进行 JPEG 压缩。
 - **交互**：绑定真实的 GPIO 中断到按键旋钮，初始化真实的 LVGL 显示屏。
 
-### Task 3.3: Watcher 网络层实现
+**完成状态 (2026-02-27)**：
+- ✅ WiFi 连接成功
+- ✅ UART 初始化成功 (GPIO 19/20)
+- ✅ I2S 音频初始化成功 (GPIO 10-16)
+- ✅ LVGL 显示屏初始化成功 (SPD2010 QSPI)
+- ✅ 显示 "Ready" 和笑脸表情
+- ⚠️ WebSocket 连接失败 (云端服务器未启动，预期行为)
+
+**技术要点**：
+- 使用 `esp_lcd_spd2010` 组件 (v1.0.0) 从远程注册表
+- 使用 `SPD2010_PANEL_BUS_QSPI_CONFIG` 和 `SPD2010_PANEL_IO_QSPI_CONFIG` 宏
+- QSPI GPIO: PCLK=7, DATA0=9, DATA1=1, DATA2=14, DATA3=13, CS=45, BL=8
+- 16MB Flash 分区表，4MB 应用分区
+
+### Task 3.3: Watcher 网络层实现 ✅
 
 配置并启动 WiFi Station 模式，连接路由器。
 
