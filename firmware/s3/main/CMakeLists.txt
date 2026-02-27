@@ -13,5 +13,5 @@ idf_component_register(
         "ws_client.c"
         "cJSON.c"
     INCLUDE_DIRS "."
-    REQUIRES esp_wifi esp_netif esp_event driver nvs_flash sensecap-watcher
+    REQUIRES esp_wifi esp_netif esp_event driver nvs_flash esp_lcd lvgl
 )

@@ -1,13 +1,192 @@
+/**
+ * HAL Display Driver for MVP-W
+ * Based on sensecap-watcher SDK, using remote registry components
+ */
 #include "hal_display.h"
-#include "sensecap-watcher.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
+#include "driver/spi_master.h"
+#include "driver/ledc.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_spd2010.h"
 #include "lvgl.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #define TAG "HAL_DISPLAY"
 
+/* Display configuration (from sensecap-watcher.h) */
+#define LCD_H_RES          412
+#define LCD_V_RES          412
+#define LCD_PIXEL_CLK_HZ   (40 * 1000 * 1000)
+#define LCD_CMD_BITS       32
+#define LCD_PARAM_BITS     8
+#define LCD_BITS_PER_PIXEL 16
+
+/* SPI/QSPI GPIO (from sensecap-watcher.h) */
+#define LCD_SPI_NUM        SPI3_HOST
+#define LCD_SPI_CS         45
+#define LCD_GPIO_BL        8
+
+/* QSPI data lines */
+#define LCD_SPI_PCLK       7
+#define LCD_SPI_DATA0      9
+#define LCD_SPI_DATA1      1
+#define LCD_SPI_DATA2      14
+#define LCD_SPI_DATA3      13
+
+/* Backlight PWM */
+#define LCD_LEDC_TIMER     LEDC_TIMER_1
+#define LCD_LEDC_MODE      LEDC_LOW_SPEED_MODE
+#define LCD_LEDC_CHANNEL   LEDC_CHANNEL_1
+#define LCD_LEDC_DUTY_RES  LEDC_TIMER_10_BIT
+
+/* LVGL buffer */
+#define LVGL_BUF_HEIGHT    50
+
+static esp_lcd_panel_io_handle_t panel_io = NULL;
+static esp_lcd_panel_handle_t panel = NULL;
+static lv_disp_draw_buf_t disp_buf;
+static lv_color_t *lvgl_buf = NULL;
+static lv_disp_drv_t disp_drv;
 static lv_obj_t *label_text = NULL;
 static lv_obj_t *label_emoji = NULL;
 static bool is_initialized = false;
+static SemaphoreHandle_t lvgl_mutex = NULL;
+
+/* Forward declarations */
+static void disp_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p);
+static void lvgl_tick_task(void *arg);
+
+/* Initialize backlight PWM */
+static esp_err_t backlight_init(void)
+{
+    ledc_timer_config_t timer_cfg = {
+        .speed_mode = LCD_LEDC_MODE,
+        .duty_resolution = LCD_LEDC_DUTY_RES,
+        .timer_num = LCD_LEDC_TIMER,
+        .freq_hz = 5000,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ESP_RETURN_ON_ERROR(ledc_timer_config(&timer_cfg), TAG, "LEDC timer config failed");
+
+    ledc_channel_config_t ch_cfg = {
+        .speed_mode = LCD_LEDC_MODE,
+        .channel = LCD_LEDC_CHANNEL,
+        .timer_sel = LCD_LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = LCD_GPIO_BL,
+        .duty = 0,
+        .hpoint = 0,
+    };
+    ESP_RETURN_ON_ERROR(ledc_channel_config(&ch_cfg), TAG, "LEDC channel config failed");
+
+    return ESP_OK;
+}
+
+static esp_err_t backlight_set(int percent)
+{
+    if (percent > 100) percent = 100;
+    if (percent < 0) percent = 0;
+
+    uint32_t duty = (BIT(LCD_LEDC_DUTY_RES) * percent) / 100;
+    return ledc_set_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL, duty) ||
+           ledc_update_duty(LCD_LEDC_MODE, LCD_LEDC_CHANNEL);
+}
+
+/* Initialize QSPI bus */
+static esp_err_t spi_bus_init(void)
+{
+    spi_bus_config_t bus_cfg = {
+        .sclk_io_num = LCD_SPI_PCLK,
+        .mosi_io_num = LCD_SPI_DATA0,
+        .miso_io_num = -1,
+        .quadwp_io_num = LCD_SPI_DATA1,
+        .quadhd_io_num = LCD_SPI_DATA2,
+        .data4_io_num = LCD_SPI_DATA3,
+        .max_transfer_sz = LCD_H_RES * LCD_V_RES * 2,
+        .flags = SPICOMMON_BUSFLAG_QUAD,
+    };
+    return spi_bus_initialize(LCD_SPI_NUM, &bus_cfg, SPI_DMA_CH_AUTO);
+}
+
+/* Initialize LCD panel */
+static esp_err_t lcd_panel_init(void)
+{
+    /* Initialize SPI bus */
+    ESP_RETURN_ON_ERROR(spi_bus_init(), TAG, "SPI bus init failed");
+
+    /* Panel IO configuration for QSPI */
+    esp_lcd_panel_io_spi_config_t io_cfg = {
+        .cs_gpio_num = LCD_SPI_CS,
+        .dc_gpio_num = -1,
+        .spi_mode = 3,
+        .pclk_hz = LCD_PIXEL_CLK_HZ,
+        .trans_queue_depth = 10,
+        .lcd_cmd_bits = LCD_CMD_BITS,
+        .lcd_param_bits = LCD_PARAM_BITS,
+        .flags = {
+            .quad_mode = true,
+        },
+    };
+
+    spd2010_vendor_config_t vendor_cfg = {
+        .flags = {
+            .use_qspi_interface = 1,
+        },
+    };
+
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_NUM,
+                                                  &io_cfg, &panel_io), TAG, "Panel IO failed");
+
+    /* Panel configuration */
+    esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = -1,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = LCD_BITS_PER_PIXEL,
+        .vendor_config = &vendor_cfg,
+    };
+
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_spd2010(panel_io, &panel_cfg, &panel),
+                        TAG, "Panel create failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(panel), TAG, "Panel reset failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(panel), TAG, "Panel init failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(panel, true), TAG, "Panel on failed");
+
+    return ESP_OK;
+}
+
+/* LVGL flush callback */
+static void disp_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
+{
+    int offsetx1 = area->x1;
+    int offsetx2 = area->x2;
+    int offsety1 = area->y1;
+    int offsety2 = area->y2;
+
+    /* Copy buffer to LCD */
+    esp_lcd_panel_draw_bitmap(panel, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1,
+                               (uint8_t *)color_p);
+
+    lv_disp_flush_ready(disp);
+}
+
+/* LVGL tick task */
+static void lvgl_tick_task(void *arg)
+{
+    (void)arg;
+    while (1) {
+        if (xSemaphoreTake(lvgl_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
+            lv_tick_inc(5);
+            lv_timer_handler();
+            xSemaphoreGive(lvgl_mutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
 
 int hal_display_init(void)
 {
@@ -15,91 +194,120 @@ int hal_display_init(void)
         return 0;
     }
 
-    ESP_LOGI(TAG, "Initializing display with LVGL...");
+    ESP_LOGI(TAG, "Initializing display...");
 
-    /* Initialize LVGL via SDK */
-    lv_disp_t *disp = bsp_lvgl_init();
-    if (disp == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize LVGL");
+    /* Initialize backlight */
+    if (backlight_init() != ESP_OK) {
+        ESP_LOGE(TAG, "Backlight init failed");
         return -1;
     }
 
-    /* Get current active screen */
+    /* Initialize LCD panel */
+    if (lcd_panel_init() != ESP_OK) {
+        ESP_LOGE(TAG, "LCD panel init failed");
+        return -1;
+    }
+
+    /* Set default brightness */
+    backlight_set(80);
+
+    /* Create LVGL mutex */
+    lvgl_mutex = xSemaphoreCreateMutex();
+    if (!lvgl_mutex) {
+        ESP_LOGE(TAG, "Failed to create mutex");
+        return -1;
+    }
+
+    xSemaphoreTake(lvgl_mutex, portMAX_DELAY);
+
+    /* Initialize LVGL */
+    lv_init();
+
+    /* Allocate buffer in PSRAM */
+    lvgl_buf = heap_caps_malloc(LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t),
+                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!lvgl_buf) {
+        ESP_LOGW(TAG, "PSRAM alloc failed, using internal RAM");
+        lvgl_buf = malloc(LCD_H_RES * LVGL_BUF_HEIGHT * sizeof(lv_color_t));
+    }
+    if (!lvgl_buf) {
+        ESP_LOGE(TAG, "Failed to allocate LVGL buffer");
+        xSemaphoreGive(lvgl_mutex);
+        return -1;
+    }
+
+    lv_disp_draw_buf_init(&disp_buf, lvgl_buf, NULL, LCD_H_RES * LVGL_BUF_HEIGHT);
+
+    /* Initialize display driver */
+    lv_disp_drv_init(&disp_drv);
+    disp_drv.hor_res = LCD_H_RES;
+    disp_drv.ver_res = LCD_V_RES;
+    disp_drv.flush_cb = disp_flush_cb;
+    disp_drv.draw_buf = &disp_buf;
+    lv_disp_drv_register(&disp_drv);
+
+    /* Create UI elements */
     lv_obj_t *scr = lv_disp_get_scr_act(NULL);
 
-    /* Create text label */
     label_text = lv_label_create(scr);
     lv_obj_set_width(label_text, 380);
     lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -20);
+    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -50);
+    lv_label_set_text(label_text, "Loading...");
 
-    /* Create emoji label (placeholder for now) */
     label_emoji = lv_label_create(scr);
-    lv_obj_align(label_emoji, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_align(label_emoji, LV_ALIGN_CENTER, 0, 50);
     lv_label_set_text(label_emoji, "");
 
+    xSemaphoreGive(lvgl_mutex);
+
+    /* Start LVGL task */
+    xTaskCreate(lvgl_tick_task, "lvgl", 4096, NULL, 5, NULL);
+
     is_initialized = true;
-    ESP_LOGI(TAG, "Display initialized with LVGL");
+    ESP_LOGI(TAG, "Display initialized successfully");
     return 0;
 }
 
 int hal_display_set_text(const char *text, int font_size)
 {
-    if (!is_initialized || !label_text) {
-        ESP_LOGW(TAG, "Display not initialized");
+    if (!is_initialized || !label_text || !text) {
         return -1;
     }
 
-    if (!text) {
-        return -1;
+    if (xSemaphoreTake(lvgl_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        lv_label_set_text(label_text, text);
+        xSemaphoreGive(lvgl_mutex);
     }
 
-    /* Update label text */
-    lv_label_set_text(label_text, text);
-
-    /* Note: font_size is ignored for now, uses default font */
-    ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
+    ESP_LOGI(TAG, "Set text: '%s'", text);
+    (void)font_size;
     return 0;
 }
 
 int hal_display_set_emoji(int emoji_id)
 {
     if (!is_initialized || !label_emoji) {
-        ESP_LOGW(TAG, "Display not initialized");
         return -1;
     }
 
-    /* Map emoji ID to display text (MVP: using text for now) */
     const char *emoji_text = "";
     const char *emoji_name = "unknown";
 
     switch (emoji_id) {
-        case 0:  /* EMOJI_NORMAL */
-            emoji_text = "😐";
-            emoji_name = "normal";
-            break;
-        case 1:  /* EMOJI_HAPPY */
-            emoji_text = "😊";
-            emoji_name = "happy";
-            break;
-        case 2:  /* EMOJI_SAD */
-            emoji_text = "😢";
-            emoji_name = "sad";
-            break;
-        case 3:  /* EMOJI_SURPRISED */
-            emoji_text = "😮";
-            emoji_name = "surprised";
-            break;
-        case 4:  /* EMOJI_ANGRY */
-            emoji_text = "😠";
-            emoji_name = "angry";
-            break;
-        default:
-            emoji_text = "❓";
-            break;
+        case 0: emoji_text = "-"; emoji_name = "normal"; break;
+        case 1: emoji_text = "^_^"; emoji_name = "happy"; break;
+        case 2: emoji_text = "T_T"; emoji_name = "sad"; break;
+        case 3: emoji_text = "O_O"; emoji_name = "surprised"; break;
+        case 4: emoji_text = ">_<"; emoji_name = "angry"; break;
+        default: emoji_text = "?"; break;
     }
 
-    lv_label_set_text(label_emoji, emoji_text);
+    if (xSemaphoreTake(lvgl_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        lv_label_set_text(label_emoji, emoji_text);
+        xSemaphoreGive(lvgl_mutex);
+    }
+
     ESP_LOGI(TAG, "Set emoji: %s", emoji_name);
     return 0;
 }
