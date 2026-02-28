@@ -78,23 +78,42 @@ MVP-W (Minimum Viable Product - Watcher) 是一个边缘设备 + 云端大脑的
 MVP-W/
 ├── PRD.md                   # 项目需求文档
 ├── CLAUDE.md                # 本文件
+├── docs/
+│   └── COMMUNICATION_PROTOCOL.md  # 通信协议详细文档
 ├── firmware/
 │   ├── s3/                  # ESP32-S3 固件 (主控)
 │   │   ├── CMakeLists.txt
+│   │   ├── sdkconfig.defaults     # 构建配置 (关键！需与 factory_firmware 同步)
+│   │   ├── spiffs/                # PNG 动画资源 (24 帧)
 │   │   └── main/
 │   │       ├── app_main.c           # 入口 + 系统初始化
-│   │       ├── ws_client.c          # WebSocket 客户端
-│   │       ├── audio_pipeline.c     # 音频 pipeline
-│   │       ├── button_voice.c       # 按键语音触发
-│   │       ├── display_ui.c         # LVGL 屏幕显示
-│   │       ├── camera_capture.c     # Himax 拍照
-│   │       └── uart_bridge.c        # UART 转发到 MCU
-│   └── mcu/                 # ESP32-MCU 固件 (身体)
+│   │       ├── ws_client.c/.h       # WebSocket 客户端 + TTS 二进制帧处理
+│   │       ├── ws_router.c/.h       # 消息路由框架
+│   │       ├── ws_handlers.c/.h     # 消息处理器实现
+│   │       ├── button_voice.c       # 按键语音触发状态机
+│   │       ├── display_ui.c         # LVGL 屏幕显示 + 表情动画
+│   │       ├── hal_audio.c/.h       # 音频 HAL (I2S)
+│   │       ├── hal_display.c/.h     # 显示 HAL (LVGL)
+│   │       ├── hal_opus.c/.h        # Opus 编解码 HAL (待实现)
+│   │       ├── hal_uart.c/.h        # UART HAL
+│   │       ├── uart_bridge.c        # UART 转发到 MCU
+│   │       ├── emoji_png.c          # SPIFFS PNG 加载
+│   │       ├── emoji_anim.c         # 动画定时器系统
+│   │       └── camera_capture.c     # Himax 拍照 (待实现)
+│   ├── mcu/                 # ESP32-MCU 固件 (身体)
+│   │   ├── CMakeLists.txt
+│   │   └── main/
+│   │       ├── main.c                 # 入口 + 核心逻辑
+│   │       ├── uart_handler.c         # UART 指令处理
+│   │       └── servo_control.c        # 舵机控制
+│   └── test_host/           # Host 端单元测试 (Unity 框架)
 │       ├── CMakeLists.txt
-│       └── main/
-│           ├── main.c                 # 入口 + 核心逻辑
-│           ├── uart_handler.c         # UART 指令处理
-│           └── servo_control.c        # 舵机控制
+│       ├── test_ws_router.c
+│       ├── test_ws_handlers.c
+│       ├── test_uart_bridge.c
+│       ├── test_button_voice.c
+│       ├── test_display_ui.c
+│       └── mock_dependencies.h/.c
 └── server/                  # PC 云端 (其他团队负责)
     ├── websocket_server.py  # WebSocket 服务
     └── ai/
@@ -156,9 +175,15 @@ GND         ───────────► GND
 
 # 通信协议
 
+> **详细协议文档**: `docs/COMMUNICATION_PROTOCOL.md`
+
 ## WebSocket 消息格式 (Cloud ↔ Watcher)
 
-### 控制指令 (Cloud → Watcher)
+### 文本消息 (JSON)
+
+所有控制指令和状态消息使用 JSON 文本帧格式。
+
+#### 控制指令 (Cloud → Watcher)
 
 ```json
 // 舵机控制
@@ -166,13 +191,6 @@ GND         ───────────► GND
     "type": "servo",
     "x": 90,
     "y": 45
-}
-
-// TTS 播放 (Opus 音频流)
-{
-    "type": "tts",
-    "format": "opus",
-    "data": "<base64 encoded opus>"
 }
 
 // 文字显示 + 表情 (emoji 和 size 均为可选字段)
@@ -195,17 +213,19 @@ GND         ───────────► GND
     "state": "thinking",    // 或 "speaking", "idle", "error"
     "message": "正在思考..."
 }
+
+// 重启指令
+{
+    "type": "reboot"
+}
 ```
 
-### 媒体流 (Watcher → Cloud)
+#### 媒体流 (Watcher → Cloud)
 
 ```json
-// 音频流
+// 音频结束标记
 {
-    "type": "audio",
-    "format": "opus",
-    "sample_rate": 16000,
-    "data": "<base64 encoded opus>"
+    "type": "audio_end"
 }
 
 // 视频流 (JPEG)
@@ -225,6 +245,32 @@ GND         ───────────► GND
     "humidity": 60
 }
 ```
+
+### 二进制帧 (Binary Frame)
+
+音频数据（上传和下载）统一使用二进制帧格式，效率更高。
+
+#### AUD1 帧格式
+
+```
+┌──────────────┬──────────────┬─────────────────────┐
+│  Magic (4B)  │ Length (4B)  │   Opus Data (N B)   │
+│   "AUD1"     │  uint32_t LE │   编码音频数据       │
+└──────────────┴──────────────┴─────────────────────┘
+     [0-3]           [4-7]            [8-N]
+```
+
+- **Magic**: 4 字节 ASCII "AUD1"
+- **Length**: 4 字节 uint32_t 小端序，表示 Opus 数据长度
+- **Opus Data**: 实际的 Opus 编码音频数据
+
+#### 用途
+
+| 方向 | 场景 | 帧类型 |
+|------|------|--------|
+| Watcher → Cloud | 语音上传 | AUD1 二进制帧 |
+| Cloud → Watcher | TTS 播放 | AUD1 二进制帧 |
+| Watcher → Cloud | 录音结束 | `{"type":"audio_end"}` JSON 文本 |
 
 ## UART 协议 (Watcher → MCU)
 
@@ -250,37 +296,66 @@ firmware/s3/main/
 ├── app_main.c              # 入口 + 系统初始化
 │   - wifi_init()
 │   - ws_client_init()
-│   - audio_pipeline_init()
 │   - display_ui_init()
+│   - ws_router_init()
 │
 ├── ws_client.c             # WebSocket 客户端
 │   - ws_connect()
-│   - ws_send()
-│   - ws_receive_loop()
-│   - message_router()      # 根据 type 字段路由
+│   - ws_send_audio()       # AUD1 二进制帧上传
+│   - ws_send_audio_end()   # 录音结束标记
+│   - ws_handle_tts_binary() # TTS 二进制帧处理
+│   - ws_tts_complete()     # TTS 播放完成
 │
-├── audio_pipeline.c        # 音频 pipeline
-│   ├── i2s_capture_init()  # 麦克风初始化
-│   ├── opus_encode()       # Opus 编码
-│   ├── opus_decode()       # Opus 解码
-│   └── i2s_play_init()     # 喇叭初始化
+├── ws_router.c             # 消息路由框架
+│   - ws_router_init()      # 注册处理器
+│   - ws_route_message()    # JSON 消息分发
+│
+├── ws_handlers.c           # 消息处理器实现
+│   - on_servo_handler()    # 舵机控制
+│   - on_display_handler()  # 屏幕显示
+│   - on_status_handler()   # 状态更新
+│   - on_capture_handler()  # 拍照请求
+│   - ws_state_to_emoji()   # 状态→表情映射
 │
 ├── button_voice.c          # 按键语音触发
-│   ├── bsp_knob_btn_init() # 旋钮按钮初始化
-│   ├── long_press_start()  # 长按开始录音
-│   └── long_release_stop() # 长按结束录音
+│   - voice_recorder_init()
+│   - voice_recorder_process_event()
+│   - voice_recorder_tick()
 │
 ├── display_ui.c            # LVGL 屏幕显示
-│   ├── bsp_lvgl_init()     # LVGL 初始化
-│   ├── show_text()         # 显示文字
-│   └── show_emoji()        # 显示表情 (happy/sad/surprised/angry/normal)
+│   - display_ui_init()
+│   - display_update()      # 文字 + 表情更新
 │
-├── camera_capture.c        # Himax 拍照
-│   └── sscma_client_sample() # 图像采集
+├── emoji_anim.c            # PNG 动画系统
+│   - emoji_anim_start()    # 启动动画定时器
+│   - emoji_anim_stop()     # 停止动画
 │
-└── uart_bridge.c           # UART 转发到 MCU
-    ├── uart_init()         # UART 初始化
-    └── uart_forward()      # 转发指令到 MCU
+├── emoji_png.c             # SPIFFS PNG 加载
+│   - emoji_png_load()      # 从 SPIFFS 加载 PNG
+│
+├── hal_audio.c             # 音频 HAL (I2S)
+│   - hal_audio_start()     # 启动 I2S
+│   - hal_audio_read()      # 读取麦克风数据
+│   - hal_audio_write()     # 写入喇叭数据
+│   - hal_audio_stop()      # 停止 I2S
+│
+├── hal_opus.c              # Opus 编解码 HAL (待实现)
+│   - hal_opus_encode()     # PCM → Opus
+│   - hal_opus_decode()     # Opus → PCM
+│
+├── hal_display.c           # 显示 HAL (LVGL)
+│   - hal_display_init()
+│   - hal_display_update()
+│
+├── hal_uart.c              # UART HAL
+│   - hal_uart_init()
+│   - hal_uart_send()
+│
+├── uart_bridge.c           # UART 转发到 MCU
+│   - uart_bridge_init()
+│   - uart_bridge_send_servo()
+│
+└── camera_capture.c        # Himax 拍照 (待实现)
 ```
 
 ## MCU 架构 (ESP32)
@@ -348,23 +423,41 @@ uint32_t angle_to_duty(int angle) {
    └── 后续流程同按键模式
 ```
 
-## 按键模式 (备用)
+## 按键模式 (已实现)
 
 ```
 1. 用户长按旋钮按钮
-   └── bsp_knob_btn_init() → 按钮中断
+   └── voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS)
+   └── display_update("Listening...", "listening", ...)
 
 2. 开始录音
-   └── bsp_i2s_read() → PCM 数据
+   └── hal_audio_read() → PCM 数据
+   └── hal_opus_encode() → Opus 数据 (待实现)
+   └── ws_send_audio() → AUD1 二进制帧
 
-3. 实时 Opus 编码 → WebSocket 发送
-   └── opus_encode() → ws_send(audio)
+3. 用户松开按钮
+   └── voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE)
+   └── display_update("Ready", "happy", ...)
 
-4. 用户松开按钮
-   └── button_release 事件
+4. 结束录音 → 发送结束标记
+   └── ws_send_audio_end() → {"type": "audio_end"}
+```
 
-5. 结束录音 → 发送结束标记
-   └── ws_send({"type": "audio_end"})
+## TTS 播放流程 (已实现)
+
+```
+1. 云端发送 TTS 音频
+   └── WebSocket 二进制帧 (AUD1 格式)
+   └── [Magic: "AUD1"][Length: N][Opus Data]
+
+2. 设备接收并解码
+   └── ws_handle_tts_binary() → 解析帧头
+   └── hal_opus_decode() → PCM 数据 (待实现)
+   └── hal_audio_write() → 播放
+
+3. 云端发送状态更新
+   └── {"type": "status", "state": "idle", ...}
+   └── ws_tts_complete() → 停止音频
 ```
 
 ---
@@ -462,35 +555,34 @@ python main.py --host 0.0.0.0 --port 8766
 
 # 实施计划
 
-## Phase 1: 基础通信 (10h)
+## Phase 1: 基础通信 (10h) ✅
 
-- [ ] ESP32 WebSocket 客户端
-- [ ] PC WebSocket 服务器
-- [ ] 双向文本消息通信
-- [ ] 连接状态管理
-- [ ] **可靠性机制**
-  - [ ] 看门狗 (Watchdog) 配置
-  - [ ] WebSocket 自动重连
-  - [ ] 异常日志输出
+- [x] ESP32 WebSocket 客户端
+- [x] 双向文本消息通信
+- [x] 连接状态管理
+- [x] **可靠性机制**
+  - [x] 看门狗 (Watchdog) 配置
+  - [x] WebSocket 自动重连
+  - [x] 异常日志输出
 
-## Phase 2: 音频通路 (10h)
+## Phase 2: 音频通路 (10h) 🔄
 
-- [ ] ESP32 I2S 麦克风采集
-- [ ] ESP32 Opus 编码
-- [ ] PC 端 Opus 解码
-- [ ] PC 端音频录制测试
+- [x] ESP32 I2S 麦克风采集
+- [ ] ESP32 Opus 编码 (HAL 空壳，待实现)
+- [ ] PC 端 Opus 解码 (云端负责)
+- [x] TTS 二进制帧处理 (AUD1 格式)
 
-## Phase 3: 云端 AI 集成 (10h)
+## Phase 3: 云端 AI 集成 (10h) ⏳ (云端负责)
 
 - [ ] Python ASR 接口 (Whisper 等)
 - [ ] Python LLM 接口 (Claude/OpenAI)
 - [ ] Agent 逻辑
-- [ ] TTS 接口
+- [ ] TTS 接口 + AUD1 二进制帧发送
 
-## Phase 4: 控制闭环 (10h)
+## Phase 4: 控制闭环 (10h) 🔄
 
-- [ ] 舵机控制指令
-- [ ] TTS 播放通路
+- [x] 舵机控制指令处理
+- [x] TTS 播放通路 (等待云端 AUD1 数据)
 - [ ] 视频采集 (可选)
 - [ ] 整体联调
 
@@ -501,16 +593,22 @@ python main.py --host 0.0.0.0 --port 8766
 | 模块 | 文件 | 说明 |
 |------|------|------|
 | S3 入口 | `firmware/s3/main/app_main.c` | 系统初始化 |
-| WS 客户端 | `firmware/s3/main/ws_client.c` | 通信核心 |
-| 音频 pipeline | `firmware/s3/main/audio_pipeline.c` | 音视频处理 |
-| 按键触发 | `firmware/s3/main/button_voice.c` | 语音输入 |
-| 屏幕显示 | `firmware/s3/main/display_ui.c` | LVGL 显示 |
+| WS 客户端 | `firmware/s3/main/ws_client.c` | WebSocket + TTS 二进制帧处理 |
+| WS 路由 | `firmware/s3/main/ws_router.c` | 消息分发框架 |
+| WS 处理器 | `firmware/s3/main/ws_handlers.c` | 消息处理器实现 |
+| 按键触发 | `firmware/s3/main/button_voice.c` | 语音输入状态机 |
+| 屏幕显示 | `firmware/s3/main/display_ui.c` | LVGL 显示 + 表情 |
+| 表情动画 | `firmware/s3/main/emoji_anim.c` | PNG 动画定时器 |
+| 表情加载 | `firmware/s3/main/emoji_png.c` | SPIFFS PNG 加载 |
+| 音频 HAL | `firmware/s3/main/hal_audio.c` | I2S 音频抽象层 |
+| Opus HAL | `firmware/s3/main/hal_opus.c` | Opus 编解码 (待实现) |
 | UART 转发 | `firmware/s3/main/uart_bridge.c` | UART 转发到 MCU |
+| 构建配置 | `firmware/s3/sdkconfig.defaults` | **关键！需与 factory_firmware 同步** |
+| 通信协议 | `docs/COMMUNICATION_PROTOCOL.md` | 协议详细文档 |
 | MCU 入口 | `firmware/mcu/main/main.c` | 舵机控制 |
 | UART 处理 | `firmware/mcu/main/uart_handler.c` | 指令解析 |
 | 舵机控制 | `firmware/mcu/main/servo_control.c` | PWM 控制 |
-| WS 服务器 | `server/websocket_server.py` | 云端入口 |
-| Agent | `server/ai/agent.py` | AI 逻辑 |
+| 测试目录 | `firmware/s3/test_host/` | Host 端单元测试 |
 
 ---
 
@@ -526,112 +624,101 @@ python main.py --host 0.0.0.0 --port 8766
 
 # TDD 任务切片
 
-## Phase 1: 纯软件逻辑与基础设施 (Host 测试环境)
+## Phase 1: 纯软件逻辑与基础设施 (Host 测试环境) ✅
 
-这个阶段完全剥离硬件，专注于数据结构的解析和基础算法。Claude Code 可以在 Linux/Windows Host 环境下进行极速的"红 - 绿 - 重构"循环。
+这个阶段完全剥离硬件，专注于数据结构的解析和基础算法。
 
 ### Task 1.1: TDD 环境初始化 ✅
 
-Host 测试环境已验证可用，运行命令：
+Host 测试环境已验证可用。
 
+**运行命令**：
 ```bash
-# 构建（首次会自动拉取 Unity v2.5.2）
 export PATH="/c/Espressif/tools/cmake/3.24.0/bin:/c/ProgramData/mingw64/mingw64/bin:$PATH"
-cd firmware/mcu/test_host
+cd firmware/s3/test_host
 cmake -B build -G "MinGW Makefiles" -DCMAKE_C_COMPILER=gcc
 cmake --build build
-
-# 运行所有测试
 ctest --test-dir build -V
 ```
 
-结果：**21 Tests  0 Failures  (ServoMath 7 + UartProtocol 14)**
+**结果**: **45+ Tests  0 Failures** (WS Router 21 + WS Handlers 24)
 
 ### Task 1.2: MCU 运动计算层 (Math) ✅
 
 实现于 `servo_math.c` 的 `angle_to_duty(int angle)`。
-测试文件：`test_host/test_servo_math.c` — 7 个用例全部通过。
-覆盖：0°/90°/180° 精确值、负值夹紧、>180 夹紧、单调性、13-bit 分辨率范围。
 
 ### Task 1.3: MCU UART 指令解析器 (Parser) ✅
 
-实现于 `uart_protocol.c` 的 `parse_axis_cmd()`，解析文本格式 `X:90\r\n`（PRD 协议）。
-测试文件：`test_host/test_uart_protocol.c` — 14 个用例全部通过。
-覆盖：正常 X/Y 解析、边界 0/180、非法轴（Z/小写）、越界角度、格式错误、NULL 守卫。
+实现于 `uart_protocol.c` 的 `parse_axis_cmd()`。
 
-### Task 1.4: Watcher WebSocket 消息路由 (Router)
+### Task 1.4: Watcher WebSocket 消息路由 (Router) ✅
 
-实现 `ws_client.c` 中的指令分发器。
+**实现**: `ws_router.c` + `ws_handlers.c`
+- 消息路由框架 (`ws_router_init`, `ws_route_message`)
+- 消息处理器 (`on_servo_handler`, `on_display_handler`, `on_status_handler`, `on_capture_handler`)
+- 状态映射 (`ws_state_to_emoji`: thinking→analyzing, speaking→speaking, idle→standby, error→sad)
+- TTS 二进制帧处理 (`ws_handle_tts_binary`)
 
-**测试要求**：根据接收到的 JSON 的 type 字段（servo, tts, display），准确调用对应的 Mock 处理函数。
+**测试覆盖**: 24 个测试用例，覆盖所有处理器和状态映射。
 
-## Phase 2: 核心状态机与协议转换 (Host 测试 + Mock 层)
+## Phase 2: 核心状态机与协议转换 (Host 测试 + Mock 层) ✅
 
-这个阶段引入业务流程，但所有涉及外设的操作（如读串口、播放声音、刷屏幕）全部使用 Mock 函数替代。
+### Task 2.1: Watcher UART 转发队列 ✅
 
-### Task 2.1: Watcher UART 转发队列
+实现 `uart_bridge.c`，将 JSON 舵机指令转换为 `X:90\r\nY:45\r\n` 格式。
 
-实现 `uart_bridge.c`，将收到的 JSON 舵机指令转换为 `X:90\r\nY:45\r\n` 格式。
-
-**测试要求**：验证字符串拼接的正确性，并确保转换后的指令成功推入发送队列（通过 Mock 的 hal_uart_send 验证）。
-
-### Task 2.2: Watcher 音频采集状态机 (State Machine)
+### Task 2.2: Watcher 音频采集状态机 ✅
 
 实现 `button_voice.c` 中的长按录音逻辑。
 
-**测试要求**：模拟"按钮按下"事件，验证系统是否进入"录音中"状态并循环调用 Mock 的 opus_encode；模拟"按钮松开"事件，验证是否触发发送 `{"type": "audio_end"}` 标记。
-
-### Task 2.3: Watcher LVGL 状态映射
+### Task 2.3: Watcher LVGL 状态映射 ✅
 
 实现 `display_ui.c` 中表情和文字的更新逻辑。
 
-**测试要求**：传入指定的 emoji 字符串（如 "happy", "sad"），验证逻辑是否正确指向了对应的图片资源指针（Mock 掉实际的屏幕刷新 API）。
-
-## Phase 3: 硬件抽象层 (HAL) 落地 (真实 ESP32 环境)
-
-逻辑跑通且测试覆盖率达标后，切回真实的 ESP32-S3 和 ESP32 目标芯片，补齐底层驱动。这个阶段无法完全自动化 TDD，需要你结合逻辑分析仪或示波器进行验证。
+## Phase 3: 硬件抽象层 (HAL) 落地 (真实 ESP32 环境) ✅
 
 ### Task 3.1: MCU 舵机 PWM 驱动 ✅
 
-实现 `servo_control.c` 中的 `ledc_init()`，将 GPIO 12 和 GPIO 13 配置为 50Hz PWM 输出。
-
 ### Task 3.2: Watcher 外设大集成 ✅
 
-- **音频**：调用 sensecap-watcher SDK，打通 I2S 麦克风/喇叭与 Opus 编解码器。
-- **视觉**：调用 Himax SPI 摄像头接口，实现抓图并进行 JPEG 压缩。
-- **交互**：绑定真实的 GPIO 中断到按键旋钮，初始化真实的 LVGL 显示屏。
-
-**完成状态 (2026-02-27)**：
+**完成状态 (2026-02-28)**：
 - ✅ WiFi 连接成功
 - ✅ UART 初始化成功 (GPIO 19/20)
 - ✅ I2S 音频初始化成功 (GPIO 10-16)
 - ✅ LVGL 显示屏初始化成功 (SPD2010 QSPI)
-- ✅ 显示 "Ready" 和笑脸表情
-- ⚠️ WebSocket 连接失败 (云端服务器未启动，预期行为)
+- ✅ PNG 动画显示正常 (花屏问题已修复)
+- ✅ WebSocket 客户端连接
+- ✅ 消息路由和处理器集成
 
-**技术要点**：
-- 使用 `esp_lcd_spd2010` 组件 (v1.0.0) 从远程注册表
-- 使用 `SPD2010_PANEL_BUS_QSPI_CONFIG` 和 `SPD2010_PANEL_IO_QSPI_CONFIG` 宏
+**关键技术点**：
+- `sdkconfig.defaults` 必须与 `factory_firmware` 同步（PSRAM 80MHz, WiFi 使用 SPIRAM）
+- 使用 `esp_lcd_spd2010` 组件 (v1.0.0)
 - QSPI GPIO: PCLK=7, DATA0=9, DATA1=1, DATA2=14, DATA3=13, CS=45, BL=8
-- 16MB Flash 分区表，4MB 应用分区
 
 ### Task 3.3: Watcher 网络层实现 ✅
 
-配置并启动 WiFi Station 模式，连接路由器。
-
-实现基于 `esp_websocket_client` 的真实连接、心跳维持和自动重连机制。
-
-## Phase 4: 联调与集成 (双板 + 云端)
+## Phase 4: 联调与集成 (双板 + 云端) 🔄 进行中
 
 ### Task 4.1: S3 与 MCU 的 UART 通信闭环
 
-物理连接 GPIO 19/20，验证 Watcher 能否顺畅下发 `X:90\r\nY:45\r\n`，MCU 舵机是否准确响应。
+物理连接 GPIO 19/20，验证 Watcher 能否顺畅下发 `X:90\r\nY:45\r\n`。
 
 ### Task 4.2: 整体端云联调
 
-与负责云端 Python 的同事对齐，将 Watcher 连入 WebSocket 服务器。
+跑通"按键说话 → ASR → LLM 思考 (屏幕反馈) → 舵机动作 + TTS 播报"的完整 MVP 链路。
 
-跑通"按键说话 -> ASR -> LLM 思考 (屏幕反馈) -> 舵机动作 + TTS 播报"的完整 MVP 体验链路。
+---
+
+# 待开发功能
+
+| 任务 | 优先级 | 状态 | 说明 |
+|------|--------|------|------|
+| **Opus 编解码器 HAL** | 🔴 高 | 待实现 | `hal_opus.c` 当前为空壳，需集成真正的 Opus 库 |
+| **服务器端 TTS 协议对齐** | 🔴 高 | 待协调 | 服务器需使用 AUD1 二进制帧格式发送 TTS |
+| **端到端语音交互测试** | 🔴 高 | 待测试 | 完整流程：按键 → ASR → LLM → TTS |
+| **S3 ↔ MCU UART 闭环** | 🟡 中 | 待测试 | 双板通信验证 |
+| **摄像头集成** | 🟢 低 | 可选 | Himax 拍照 + JPEG + WebSocket 发送 |
+| **传感器数据上报** | 🟢 低 | 可选 | CO2/温湿度数据上报 |
 
 ---
 
@@ -697,5 +784,13 @@ void handle_crash() {
 
 ---
 
-*文档版本：2.0*
-*更新日期：2026-02-26*
+*文档版本：2.2*
+*更新日期：2026-02-28*
+
+## 变更历史
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| 2.2 | 2026-02-28 | 更新通信协议为 AUD1 二进制帧格式；添加待开发功能清单 |
+| 2.1 | 2026-02-27 | 添加 PNG 动画花屏修复记录 |
+| 2.0 | 2026-02-26 | 重构文档结构，添加 TDD 任务切片 |
