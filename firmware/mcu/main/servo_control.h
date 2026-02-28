@@ -3,7 +3,7 @@
 
 typedef enum {
     SERVO_X = 0,  /* GPIO 12 — left/right */
-    SERVO_Y = 1,  /* GPIO 13 — up/down    */
+    SERVO_Y = 1,  /* GPIO 15 — up/down    */
 } servo_axis_t;
 
 /** Initialize LEDC timer and channels for both servo axes. */

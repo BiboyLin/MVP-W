@@ -1,49 +1,57 @@
 #include "hal_opus.h"
 #include "esp_log.h"
+#include <string.h>
 
-#define TAG "HAL_OPUS"
+#define TAG "HAL_PCM"
 
-/* TODO: Integrate with Opus codec library */
-/* This is a stub implementation for MVP */
+/**
+ * @file hal_opus.c
+ * @brief Audio codec HAL - PCM passthrough implementation
+ *
+ * MVP simplification: Direct PCM transmission without any encoding.
+ * This reduces complexity and CPU usage on the ESP32-S3.
+ *
+ * Trade-offs:
+ * - Pros: Simple implementation, no CPU overhead, no codec library dependency
+ * - Cons: Higher bandwidth (~10x compared to Opus), no noise reduction
+ *
+ * PCM format: 16-bit signed, 16kHz sample rate, mono
+ * Frame size: 60ms = 960 samples = 1920 bytes
+ * Bandwidth: ~256 kbps (vs ~24 kbps with Opus)
+ */
 
 int hal_opus_init(void)
 {
-    ESP_LOGI(TAG, "Opus initialized (stub)");
+    ESP_LOGI(TAG, "Audio codec initialized (PCM passthrough mode)");
     return 0;
 }
 
 int hal_opus_encode(const uint8_t *pcm_in, int pcm_len,
-                    uint8_t *opus_out, int opus_max_len)
+                    uint8_t *out_buf, int out_max_len)
 {
-    if (!pcm_in || !opus_out || pcm_len <= 0 || opus_max_len <= 0) {
+    if (!pcm_in || !out_buf || pcm_len <= 0 || out_max_len <= 0) {
         return -1;
     }
 
-    /* TODO: Implement actual Opus encoding */
-    /* For now, just copy raw PCM data (not production-ready) */
-    int out_len = (pcm_len < opus_max_len) ? pcm_len : opus_max_len;
-    for (int i = 0; i < out_len; i++) {
-        opus_out[i] = pcm_in[i];
-    }
+    /* PCM passthrough: just copy the data */
+    int out_len = (pcm_len < out_max_len) ? pcm_len : out_max_len;
+    memcpy(out_buf, pcm_in, out_len);
 
-    ESP_LOGD(TAG, "Encode: %d -> %d bytes (stub)", pcm_len, out_len);
+    ESP_LOGD(TAG, "PCM passthrough: %d bytes", out_len);
     return out_len;
 }
 
-int hal_opus_decode(const uint8_t *opus_in, int opus_len,
+int hal_opus_decode(const uint8_t *in_data, int in_len,
                     uint8_t *pcm_out, int pcm_max_len)
 {
-    if (!opus_in || !pcm_out || opus_len <= 0 || pcm_max_len <= 0) {
+    if (!in_data || !pcm_out || in_len <= 0 || pcm_max_len <= 0) {
         return -1;
     }
 
-    /* TODO: Implement actual Opus decoding */
-    /* For now, just copy raw data (not production-ready) */
-    int out_len = (opus_len < pcm_max_len) ? opus_len : pcm_max_len;
-    for (int i = 0; i < out_len; i++) {
-        pcm_out[i] = opus_in[i];
-    }
+    /* PCM passthrough: just copy the data */
+    int out_len = (in_len < pcm_max_len) ? in_len : pcm_max_len;
+    memcpy(pcm_out, in_data, out_len);
 
-    ESP_LOGD(TAG, "Decode: %d -> %d bytes (stub)", opus_len, out_len);
+    ESP_LOGD(TAG, "PCM passthrough: %d bytes", out_len);
     return out_len;
 }

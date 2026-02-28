@@ -20,10 +20,8 @@ static voice_stats_t g_stats = {0};
 
 /* Audio buffer for PCM data (16kHz, 16-bit, 60ms frame = 1920 bytes) */
 #define PCM_FRAME_SIZE  1920
-#define OPUS_FRAME_SIZE 256  /* Approximate max Opus frame size */
 
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
-static uint8_t g_opus_buf[OPUS_FRAME_SIZE];
 
 /* ------------------------------------------------------------------ */
 /* Public: Initialize                                                 */
@@ -125,7 +123,7 @@ void voice_recorder_process_event(voice_event_t event)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Process tick (read, encode, send)                          */
+/* Public: Process tick (read, send)                                   */
 /* ------------------------------------------------------------------ */
 
 int voice_recorder_tick(void)
@@ -134,7 +132,7 @@ int voice_recorder_tick(void)
         return 0;
     }
 
-    /* Read audio samples */
+    /* Read audio samples (PCM: 16-bit, 16kHz, mono) */
     int pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
     if (pcm_len < 0) {
         g_stats.error_count++;
@@ -144,21 +142,14 @@ int voice_recorder_tick(void)
         return 0;  /* No data available */
     }
 
-    /* Encode to Opus */
-    int opus_len = hal_opus_encode(g_pcm_buf, pcm_len, g_opus_buf, OPUS_FRAME_SIZE);
-    if (opus_len < 0) {
-        g_stats.error_count++;
-        return -1;
-    }
-
-    /* Send via WebSocket */
-    if (ws_send_audio(g_opus_buf, opus_len) != 0) {
+    /* Send PCM directly via WebSocket (no encoding) */
+    if (ws_send_audio(g_pcm_buf, pcm_len) != 0) {
         g_stats.error_count++;
         return -1;
     }
 
     g_stats.encode_count++;
-    return 1;  /* One frame encoded and sent */
+    return 1;  /* One frame sent */
 }
 
 /* ------------------------------------------------------------------ */

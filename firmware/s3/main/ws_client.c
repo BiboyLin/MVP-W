@@ -209,10 +209,10 @@ int ws_send_audio_end(void)
 /**
  * Parse and play TTS audio from binary frame
  *
- * Frame format:
+ * Frame format (AUD1):
  *   [0-3]   "AUD1" magic bytes
  *   [4-7]   uint32_t data length (little-endian)
- *   [8-n]   Opus encoded audio data
+ *   [8-n]   PCM audio data (16-bit, 16kHz, mono)
  *
  * @param data Binary frame data
  * @param len Frame length
@@ -231,45 +231,45 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
     }
 
     /* Parse data length */
-    uint32_t opus_len;
-    memcpy(&opus_len, data + 4, 4);
+    uint32_t pcm_len;
+    memcpy(&pcm_len, data + 4, 4);
 
-    if (opus_len == 0 || opus_len > (uint32_t)(len - AUDIO_HEADER_LEN)) {
-        ESP_LOGW(TAG, "TTS frame invalid length: %" PRIu32 " (frame: %d)", opus_len, len);
+    if (pcm_len == 0 || pcm_len > (uint32_t)(len - AUDIO_HEADER_LEN)) {
+        ESP_LOGW(TAG, "TTS frame invalid length: %" PRIu32 " (frame: %d)", pcm_len, len);
         return;
     }
 
-    const uint8_t *opus_data = data + AUDIO_HEADER_LEN;
+    const uint8_t *pcm_data = data + AUDIO_HEADER_LEN;
 
-    ESP_LOGI(TAG, "TTS audio received: %" PRIu32 " bytes Opus", opus_len);
+    ESP_LOGI(TAG, "TTS audio received: %" PRIu32 " bytes PCM", pcm_len);
 
     /* Update display to speaking animation */
     display_update(NULL, "speaking", 0, NULL);
 
-    /* Decode Opus to PCM */
-    uint8_t *pcm_buf = malloc(4096);  /* Enough for one Opus frame */
-    if (!pcm_buf) {
-        ESP_LOGE(TAG, "Failed to allocate PCM buffer");
+    /* Decode (passthrough for PCM) */
+    uint8_t *out_buf = malloc(4096);
+    if (!out_buf) {
+        ESP_LOGE(TAG, "Failed to allocate audio buffer");
         return;
     }
 
-    int pcm_len = hal_opus_decode(opus_data, opus_len, pcm_buf, 4096);
-    if (pcm_len > 0) {
-        ESP_LOGI(TAG, "TTS decoded: %d bytes PCM", pcm_len);
+    int out_len = hal_opus_decode(pcm_data, pcm_len, out_buf, 4096);
+    if (out_len > 0) {
+        ESP_LOGI(TAG, "TTS playing: %d bytes PCM", out_len);
 
         /* Start audio playback if not already started */
         hal_audio_start();
 
         /* Play PCM data */
-        int written = hal_audio_write(pcm_buf, pcm_len);
-        if (written != pcm_len) {
-            ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, pcm_len);
+        int written = hal_audio_write(out_buf, out_len);
+        if (written != out_len) {
+            ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, out_len);
         }
     } else {
-        ESP_LOGW(TAG, "TTS Opus decode failed");
+        ESP_LOGW(TAG, "TTS decode failed");
     }
 
-    free(pcm_buf);
+    free(out_buf);
 
     /* Note: Don't stop audio here - may receive more frames */
     /* Display will be updated by caller when TTS is complete */

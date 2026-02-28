@@ -5,7 +5,7 @@
 
 /* GPIO assignment */
 #define SERVO_X_GPIO    12
-#define SERVO_Y_GPIO    13
+#define SERVO_Y_GPIO    15
 
 /* LEDC assignment */
 #define LEDC_TIMER      LEDC_TIMER_0

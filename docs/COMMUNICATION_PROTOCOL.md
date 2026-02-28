@@ -1,7 +1,8 @@
-# MVP-W 通讯协议文档 v1.0
+# MVP-W 通讯协议文档 v1.1
 
 > 文档日期：2026-02-28
-> 状态：待确认
+> 状态：已确认
+> 更新：音频格式从 Opus 改为 PCM（简化实现）
 
 ## 1. 系统架构
 
@@ -74,23 +75,24 @@ ws_router → on_servo_handler() → uart_bridge_send_servo(x, y)
 **二进制帧格式**（与音频上传一致）：
 ```
 ┌──────────┬────────────┬─────────────────┐
-│  魔数    │   数据长度  │   Opus 数据     │
+│  魔数    │   数据长度  │   PCM 数据      │
 │  4 字节  │   4 字节   │    N 字节       │
 └──────────┴────────────┴─────────────────┘
 
 魔数: "AUD1" (0x41 0x55 0x44 0x31)
 长度: uint32_t little-endian
+音频: 16-bit signed PCM, 16kHz, mono
 ```
 
 **Watcher 内部处理流程**：
 ```
-WebSocket 二进制消息 → 检查魔数 AUD1 → 解析长度 → Opus 解码 → I2S 播放
+WebSocket 二进制消息 → 检查魔数 AUD1 → 解析长度 → I2S 播放
 ```
 
 **说明**：
 - TTS 音频与上传音频使用相同的二进制帧格式
-- Watcher 端通过 WebSocket 消息类型（二进制 vs 文本）区分
-- 收到二进制帧时，根据当前状态判断是录音回显还是 TTS 播放
+- **音频格式**：16-bit signed PCM, 16kHz 采样率, 单声道
+- 带宽：约 256 kbps（相比 Opus 24kbps 更高，但无需编解码）
 
 ### 3.3 屏幕显示
 
@@ -172,13 +174,21 @@ ws_router → on_reboot_handler() → esp_restart()
 **帧结构**：
 ```
 ┌──────────┬────────────┬─────────────────┐
-│  魔数    │   数据长度  │   Opus 数据     │
+│  魔数    │   数据长度  │   PCM 数据      │
 │  4 字节  │   4 字节   │    N 字节       │
 └──────────┴────────────┴─────────────────┘
 
 魔数: "AUD1" (0x41 0x55 0x44 0x31)
 长度: uint32_t little-endian
+音频: 16-bit signed PCM, 16kHz, mono
 ```
+
+**音频参数**：
+- 采样率：16000 Hz
+- 位深：16-bit signed
+- 声道：mono (单声道)
+- 帧大小：60ms = 960 samples = 1920 bytes
+- 带宽：~256 kbps
 
 **Cloud 端解析示例 (Python)**：
 ```python
@@ -191,9 +201,9 @@ def parse_audio_frame(data: bytes) -> bytes:
         raise ValueError(f"Invalid magic: {magic}")
 
     length = struct.unpack('<I', data[4:8])[0]
-    opus_data = data[8:8+length]
+    pcm_data = data[8:8+length]
 
-    return opus_data
+    return pcm_data  # 16-bit PCM, 16kHz, mono
 ```
 
 **Watcher 端解析示例 (C)**：
@@ -208,6 +218,14 @@ int parse_audio_frame(const uint8_t *data, int len, uint32_t *out_len) {
     memcpy(out_len, data + 4, 4);  // Little-endian
     return 8;  // Return header size, data starts at offset 8
 }
+```
+
+**构建音频帧 (Python)**：
+```python
+def build_audio_frame(pcm_data: bytes) -> bytes:
+    """Build AUD1 frame from PCM data"""
+    header = b'AUD1' + struct.pack('<I', len(pcm_data))
+    return header + pcm_data
 ```
 
 ### 3.8 录音结束
@@ -267,8 +285,16 @@ Y:45\r\n
 - [ ] 传感器数据：MVP 是否需要？
 - [ ] 错误处理：是否需要 `{"type": "error", "code": ..., "message": ...}` 消息？
 - [x] ~~TTS 音频格式~~ → 已确定使用二进制帧格式（与上传一致）
+- [x] ~~音频编解码~~ → MVP 使用 PCM 直传（无压缩），后续可升级 Opus
 
 ---
 
-*文档版本：1.0*
+*文档版本：1.1*
 *更新日期：2026-02-28*
+
+## 变更历史
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| 1.1 | 2026-02-28 | 音频格式从 Opus 改为 PCM 直传 |
+| 1.0 | 2026-02-28 | 初始版本 |
