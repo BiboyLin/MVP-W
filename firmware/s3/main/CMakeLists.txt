@@ -13,9 +13,6 @@ idf_component_register(
         "wifi_client.c"
         "ws_client.c"
         "cJSON.c"
-        # SPIFFS-based emoji system
-        "emoji_png.c"
-        "emoji_anim.c"
     INCLUDE_DIRS "."
     REQUIRES esp_wifi esp_netif esp_event driver nvs_flash sensecap-watcher spiffs
 )
