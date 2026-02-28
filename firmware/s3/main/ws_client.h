@@ -52,4 +52,17 @@ int ws_send_audio(const uint8_t *data, int len);
  */
 int ws_send_audio_end(void);
 
+/**
+ * Handle TTS binary frame from WebSocket
+ * @param data Binary frame data (AUD1 format)
+ * @param len Frame length
+ */
+void ws_handle_tts_binary(const uint8_t *data, int len);
+
+/**
+ * Signal TTS playback complete
+ * Call this when TTS session is finished
+ */
+void ws_tts_complete(void);
+
 #endif /* WS_CLIENT_H */

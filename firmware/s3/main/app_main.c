@@ -5,6 +5,7 @@
 #include "driver/uart.h"
 
 #include "ws_router.h"
+#include "ws_handlers.h"
 #include "uart_bridge.h"
 #include "button_voice.h"
 #include "display_ui.h"
@@ -13,11 +14,30 @@
 #include "hal_uart.h"
 #include "hal_audio.h"
 #include "hal_display.h"
+#include "sensecap-watcher.h"
 
 #define TAG "MAIN"
 
 /* Hardware test mode (set to 1 for self-test) */
 #define ENABLE_HW_SELFTEST  1
+
+/* ------------------------------------------------------------------ */
+/* Button Callbacks (using SDK's bsp_set_btn_* interface)            */
+/* ------------------------------------------------------------------ */
+
+static void on_button_long_press(void)
+{
+    ESP_LOGI(TAG, "Button LONG PRESS - start recording");
+    voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
+    display_update("Listening...", "listening", 0, NULL);
+}
+
+static void on_button_long_release(void)
+{
+    ESP_LOGI(TAG, "Button LONG RELEASE - stop recording");
+    voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+    display_update("Ready", "happy", 0, NULL);
+}
 
 /* ------------------------------------------------------------------ */
 /* Hardware Self-Test                                                 */
@@ -124,11 +144,10 @@ void app_main(void)
     /* 3. Initialize voice recorder */
     voice_recorder_init();
 
-    /* 3.5 Start voice recorder (button + task) */
-    if (voice_recorder_start() != 0) {
-        ESP_LOGE(TAG, "Voice recorder start failed");
-        /* Continue anyway - may work later */
-    }
+    /* 3.5 Register button callbacks (SDK already initialized IO expander) */
+    bsp_set_btn_long_press_cb(on_button_long_press);
+    bsp_set_btn_long_release_cb(on_button_long_release);
+    ESP_LOGI(TAG, "Button callbacks registered via SDK");
 
     /* 4. Initialize and connect to WiFi */
     display_update("Connecting WiFi...", "normal", 0, NULL);
@@ -145,15 +164,9 @@ void app_main(void)
     ws_client_init();
 
     /* 6. Register message router handlers */
-    ws_router_t router = {
-        .on_servo   = NULL,  /* Will forward to UART */
-        .on_tts     = NULL,  /* Will play audio */
-        .on_display = NULL,  /* Will update display */
-        .on_status  = NULL,  /* Will update status */
-        .on_capture = NULL,  /* Will capture image */
-        .on_reboot  = NULL,  /* Will reboot */
-    };
+    ws_router_t router = ws_handlers_get_router();
     ws_router_init(&router);
+    ESP_LOGI(TAG, "WS router handlers registered");
 
     /* 7. Start WebSocket connection */
     display_update("Connecting Cloud...", "normal", 0, NULL);
@@ -163,10 +176,16 @@ void app_main(void)
     ESP_LOGI(TAG, "Ready");
     display_update("Ready", "happy", 0, NULL);
 
-    /* Main loop - feed watchdog */
+    /* Main loop - process audio, feed watchdog */
     esp_task_wdt_add(NULL);
     while (1) {
+        /* Process audio if recording */
+        voice_recorder_tick();
+
+        /* Feed watchdog */
         esp_task_wdt_reset();
-        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        /* Short delay for responsiveness (60ms for audio frame rate) */
+        vTaskDelay(pdMS_TO_TICKS(60));
     }
 }
