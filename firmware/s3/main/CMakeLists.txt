@@ -10,9 +10,13 @@ idf_component_register(
         "hal_display.c"
         "hal_uart.c"
         "hal_opus.c"
+        "hal_button.c"
         "wifi_client.c"
         "ws_client.c"
         "cJSON.c"
+        # SPIFFS-based emoji animation system
+        "emoji_png.c"
+        "emoji_anim.c"
     INCLUDE_DIRS "."
     REQUIRES esp_wifi esp_netif esp_event driver nvs_flash sensecap-watcher spiffs
 )
