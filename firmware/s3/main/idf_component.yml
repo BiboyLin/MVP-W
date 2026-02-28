@@ -3,11 +3,15 @@ dependencies:
     version: "^1.2.0"
   lvgl/lvgl:
     version: "==8.3.9"
-  espressif/esp_lvgl_port:
-    version: "^2.0.0"
   espressif/esp_lcd_spd2010:
     version: "^1.0.0"
   espressif/esp_io_expander:
     version: "^1.0.0"
   esp_io_expander_pca95xx_16bit:
     override_path: "../components/esp_io_expander_pca95xx_16bit"
+  esp_lvgl_port:
+    override_path: "../components/esp_lvgl_port"
+  sensecap-watcher:
+    override_path: "../components/sensecap-watcher"
+  sscma_client:
+    override_path: "../components/sscma_client"
