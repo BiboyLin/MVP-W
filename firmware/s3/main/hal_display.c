@@ -29,19 +29,20 @@ static bool is_initialized = false;
 /* Map display_ui emoji_type to emoji_png emoji_anim_type */
 static emoji_anim_type_t map_emoji_type(int ui_emoji_id)
 {
-    /* display_ui.h: 0=normal, 1=happy, 2=sad, 3=surprised, 4=angry */
-    /*              5=listening, 6=analyzing, 7=speaking, 8=standby */
-    /* Map to SPIFFS emoji types */
+    /* display_ui.h: 0=standby, 1=happy, 2=sad, 3=surprised, 4=angry,
+     *              5=listening, 6=analyzing, 7=speaking */
+    /* emoji_png.h: 0=greeting, 1=detecting, 2=detected, 3=speaking,
+     *              4=listening, 5=analyzing, 6=standby */
+    /* NOTE: speaking PNGs are 240x240 (wrong size), temporarily use analyzing */
     switch (ui_emoji_id) {
-        case 0:  /* EMOJI_NORMAL */    return EMOJI_ANIM_STANDBY;
-        case 1:  /* EMOJI_HAPPY */     return EMOJI_ANIM_GREETING;
-        case 2:  /* EMOJI_SAD */       return EMOJI_ANIM_DETECTED;
-        case 3:  /* EMOJI_SURPRISED */ return EMOJI_ANIM_DETECTING;
-        case 4:  /* EMOJI_ANGRY */     return EMOJI_ANIM_ANALYZING;
-        case 5:  /* EMOJI_LISTENING */ return EMOJI_ANIM_LISTENING;
-        case 6:  /* EMOJI_ANALYZING */ return EMOJI_ANIM_ANALYZING;
-        case 7:  /* EMOJI_SPEAKING */  return EMOJI_ANIM_SPEAKING;
-        case 8:  /* EMOJI_STANDBY */   return EMOJI_ANIM_STANDBY;
+        case 0:  /* EMOJI_STANDBY */   return EMOJI_ANIM_STANDBY;    /* standby */
+        case 1:  /* EMOJI_HAPPY */     return EMOJI_ANIM_GREETING;   /* greeting */
+        case 2:  /* EMOJI_SAD */       return EMOJI_ANIM_DETECTED;   /* detected */
+        case 3:  /* EMOJI_SURPRISED */ return EMOJI_ANIM_DETECTING;  /* detecting */
+        case 4:  /* EMOJI_ANGRY */     return EMOJI_ANIM_ANALYZING;  /* analyzing */
+        case 5:  /* EMOJI_LISTENING */ return EMOJI_ANIM_LISTENING;  /* listening */
+        case 6:  /* EMOJI_ANALYZING */ return EMOJI_ANIM_ANALYZING;  /* analyzing */
+        case 7:  /* EMOJI_SPEAKING */  return EMOJI_ANIM_ANALYZING;  /* analyzing (temp) */
         default: return EMOJI_ANIM_STANDBY;
     }
 }
@@ -185,7 +186,7 @@ int hal_display_set_emoji(int emoji_id)
 
     const char *emoji_name = "unknown";
     switch (emoji_id) {
-        case 0:  emoji_name = "normal"; break;
+        case 0:  emoji_name = "standby"; break;
         case 1:  emoji_name = "happy"; break;
         case 2:  emoji_name = "sad"; break;
         case 3:  emoji_name = "surprised"; break;
@@ -193,7 +194,6 @@ int hal_display_set_emoji(int emoji_id)
         case 5:  emoji_name = "listening"; break;
         case 6:  emoji_name = "analyzing"; break;
         case 7:  emoji_name = "speaking"; break;
-        case 8:  emoji_name = "standby"; break;
     }
 
     ESP_LOGI(TAG, "Set emoji: %s -> %s animation", emoji_name, emoji_type_name(type));

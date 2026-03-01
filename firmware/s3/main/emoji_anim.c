@@ -73,10 +73,13 @@ int emoji_anim_start(emoji_anim_type_t type)
         return -1;
     }
 
-    /* Stop existing animation */
-    emoji_anim_stop();
+    /* If same type is already playing, no need to restart */
+    if (g_current_type == type && g_timer != NULL) {
+        ESP_LOGD(TAG, "Animation %s already playing", emoji_type_name(type));
+        return 0;
+    }
 
-    /* Set new type */
+    /* Set new type and reset frame */
     g_current_type = type;
     g_current_frame = 0;
 
@@ -86,12 +89,25 @@ int emoji_anim_start(emoji_anim_type_t type)
         lv_img_set_src(g_img_obj, img);
     }
 
-    /* Start timer if more than one frame */
+    /* Reuse or create timer for animation */
     if (frame_count > 1) {
-        g_timer = lv_timer_create(emoji_timer_callback, g_interval_ms, NULL);
-        if (g_timer == NULL) {
-            ESP_LOGE(TAG, "Failed to create timer");
-            return -1;
+        if (g_timer != NULL) {
+            /* Reuse existing timer - just reset it */
+            lv_timer_reset(g_timer);
+            lv_timer_set_period(g_timer, g_interval_ms);
+            lv_timer_resume(g_timer);
+        } else {
+            /* Create new timer only if none exists */
+            g_timer = lv_timer_create(emoji_timer_callback, g_interval_ms, NULL);
+            if (g_timer == NULL) {
+                ESP_LOGE(TAG, "Failed to create timer");
+                return -1;
+            }
+        }
+    } else {
+        /* Single frame - pause timer if exists */
+        if (g_timer != NULL) {
+            lv_timer_pause(g_timer);
         }
     }
 
@@ -101,9 +117,9 @@ int emoji_anim_start(emoji_anim_type_t type)
 
 void emoji_anim_stop(void)
 {
+    /* Pause timer instead of deleting - allows reuse */
     if (g_timer != NULL) {
-        lv_timer_del(g_timer);
-        g_timer = NULL;
+        lv_timer_pause(g_timer);
     }
     g_current_type = EMOJI_ANIM_NONE;
     g_current_frame = 0;

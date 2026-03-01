@@ -13,7 +13,7 @@
 #include "lvgl.h"
 
 /* Animation frame intervals in milliseconds */
-#define EMOJI_ANIM_INTERVAL_MS   200
+#define EMOJI_ANIM_INTERVAL_MS   150   /* Optimized for smoother animation (was 200ms) */
 
 /**
  * @brief Animation callback function type

@@ -4,15 +4,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Supported emoji types */
+/* Supported emoji types - maps to SPIFFS animations */
 typedef enum {
-    EMOJI_NORMAL = 0,
-    EMOJI_HAPPY,
-    EMOJI_SAD,
-    EMOJI_SURPRISED,
-    EMOJI_ANGRY,
-    EMOJI_THINKING,
-    EMOJI_COUNT,  /* Sentinel */
+    EMOJI_STANDBY = 0,    /* standby - idle/default state */
+    EMOJI_HAPPY,          /* greeting - success/happy */
+    EMOJI_SAD,            /* detected - error/sad */
+    EMOJI_SURPRISED,      /* detecting - surprised (legacy) */
+    EMOJI_ANGRY,          /* analyzing - angry (legacy) */
+    EMOJI_LISTENING,      /* listening - recording user voice */
+    EMOJI_ANALYZING,      /* analyzing - AI processing */
+    EMOJI_SPEAKING,       /* speaking - TTS playback */
+    EMOJI_COUNT,          /* Sentinel */
     EMOJI_UNKNOWN = -1,
 } emoji_type_t;
 
