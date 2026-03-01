@@ -2,51 +2,57 @@
 
 ## 当前状态 (2026-03-01)
 
-### MVP v1.0 已完成 ✅
+### MVP v1.0.1 已完成 ✅
 - 端到端语音交互（按键 → ASR → LLM → TTS）
 - Raw PCM 24kHz TTS 播放
 - S3 ↔ MCU UART 闭环
 - PNG 动画显示
+- **新增**: TTS 2秒超时自动切换到 happy 状态
+- **新增**: 动画状态映射优化（7种表情 + 150ms 切换）
+- **新增**: 文字居中显示 + 30字符截断
 
-### 已知 Bug 列表
+### 已修复 Bug 列表
 
-| # | Bug | 优先级 | 说明 |
-|---|-----|--------|------|
-| 1 | **文字显示在 PNG 背后** | 🔴 高 | 文字被动画覆盖，需要调整 Z-order 或布局 |
-| 2 | **中文显示为方块** | 🔴 高 | 缺少中文字体，需要添加中文字体文件 |
-| 3 | **动画切换响应慢** | 🟡 中 | 状态切换时有延迟，可能需要优化动画定时器 |
+| # | Bug | 状态 | 解决方案 |
+|---|-----|------|----------|
+| 1 | **文字显示在 PNG 背后** | ✅ 已修复 | 调整 LVGL 对象创建顺序 |
+| 2 | **中文显示为方块** | ⏳ 部分修复 | SimSun 16 CJK 字体支持有限，需自定义字体 |
+| 3 | **动画切换响应慢** | ✅ 已修复 | 定时器复用 + 150ms 间隔 |
+| 4 | **TTS 播放后不切换状态** | ✅ 已修复 | 2秒超时自动检测 |
+| 5 | **Speaking 动画花屏** | ⏳ 临时方案 | 临时使用 listening 动画（PNG 尺寸不匹配）|
 
 ---
 
-## 动画状态映射表
+## 动画状态映射表 (v2)
 
 ### 代码层 → SPIFFS 动画映射
 
 | emoji_type_t | 值 | 代码调用 | SPIFFS 动画 | 帧数 |
 |--------------|---|----------|-------------|------|
-| EMOJI_NORMAL | 0 | `display_update(..., "normal", ...)` | standby | 4 |
-| EMOJI_HAPPY | 1 | `display_update(..., "happy", ...)` | greeting | 3 |
-| EMOJI_SAD | 2 | `display_update(..., "sad", ...)` | detected | ? |
-| EMOJI_SURPRISED | 3 | `display_update(..., "surprised", ...)` | detecting | ? |
-| EMOJI_ANGRY | 4 | `display_update(..., "angry", ...)` | analyzing | ? |
-| EMOJI_LISTENING | 5 | (未使用) | listening | ? |
-| EMOJI_ANALYZING | 6 | `display_update(..., "analyzing", ...)` | analyzing | ? |
-| EMOJI_SPEAKING | 7 | (TTS 时自动) | speaking | ? |
-| EMOJI_STANDBY | 8 | (待机) | standby | 4 |
+| EMOJI_STANDBY | 0 | `display_update(..., "standby"/"normal"/"idle", ...)` | standby | 4 |
+| EMOJI_HAPPY | 1 | `display_update(..., "happy"/"success", ...)` | greeting | 3 |
+| EMOJI_SAD | 2 | `display_update(..., "sad"/"error", ...)` | detected | 24 |
+| EMOJI_SURPRISED | 3 | `display_update(..., "surprised", ...)` | detecting | 24 |
+| EMOJI_ANGRY | 4 | `display_update(..., "angry", ...)` | analyzing | 24 |
+| EMOJI_LISTENING | 5 | `display_update(..., "listening", ...)` | listening | 24 |
+| EMOJI_ANALYZING | 6 | `display_update(..., "analyzing"/"thinking", ...)` | analyzing | 24 |
+| EMOJI_SPEAKING | 7 | `display_update(..., "speaking", ...)` | listening (temp) | 24 |
+
+> **注意**: Speaking 动画临时使用 listening，因为 speaking PNG 文件是 240x240（其他是 412x412）
 
 ### 实际使用场景
 
 | 场景 | 调用位置 | emoji 参数 | 动画 |
 |------|----------|------------|------|
-| 启动完成 | `app_main.c:187` | "happy" | greeting |
-| WebSocket 连接成功 | `ws_client.c:32` | "happy" | greeting |
-| WebSocket 断开 | `ws_client.c:39` | "standby" | standby |
-| 开始录音 | `button_voice.c:199` | "normal" | standby |
-| 结束录音 | `button_voice.c:203` | "thinking" | analyzing |
-| ASR 结果 | `ws_client.c:56` | "analyzing" | analyzing |
-| TTS 播放 | `ws_client.c:223` | "speaking" | speaking |
-| TTS 完成 | `ws_client.c:248` | "happy" | greeting |
-| 错误 | `ws_client.c:66` | "sad" | detected |
+| 启动完成 | `app_main.c` | "happy" | greeting |
+| WebSocket 连接成功 | `ws_client.c` | "happy" | greeting |
+| WebSocket 断开 | `ws_client.c` | "standby" | standby |
+| 按键按下（开始录音） | `app_main.c` | "listening" | listening |
+| 按键松开（处理中） | `app_main.c` | "analyzing" | analyzing |
+| ASR 结果 | `ws_client.c` | "analyzing" | analyzing |
+| TTS 播放 | `ws_client.c` | "speaking" | listening (temp) |
+| TTS 完成/超时 | `ws_client.c` | "happy" | greeting |
+| 错误 | `ws_client.c` | "sad" | detected |
 
 ### 关键文件
 
