@@ -41,7 +41,8 @@ int hal_audio_init(void)
     }
 
     codec_initialized = true;
-    ESP_LOGI(TAG, "Audio codec initialized");
+    is_running = true;  /* Keep codec running always */
+    ESP_LOGI(TAG, "Audio codec initialized and running");
     return 0;
 }
 
@@ -56,13 +57,6 @@ int hal_audio_start(void)
         if (hal_audio_init() != 0) {
             return -1;
         }
-    }
-
-    /* Resume codec device */
-    esp_err_t ret = bsp_codec_dev_resume();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to resume codec: %s", esp_err_to_name(ret));
-        return -1;
     }
 
     is_running = true;
@@ -110,12 +104,9 @@ int hal_audio_stop(void)
         return 0;
     }
 
-    esp_err_t ret = bsp_codec_dev_stop();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Stop error: %s", esp_err_to_name(ret));
-    }
-
+    /* Just mark as stopped, don't actually stop the codec */
+    /* This avoids I2S reconfiguration issues */
     is_running = false;
-    ESP_LOGI(TAG, "Audio stopped");
+    ESP_LOGI(TAG, "Audio stopped (codec stays running)");
     return 0;
 }

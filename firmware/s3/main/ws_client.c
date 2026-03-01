@@ -17,6 +17,7 @@
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
+static bool tts_playing = false;  /* TTS playback state */
 
 static void ws_event_handler(void *handler_args, esp_event_base_t base,
                              int32_t event_id, void *event_data)
@@ -43,6 +44,11 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                 /* Handle server text messages */
                 char *msg = strndup((char *)data->data_ptr, data->data_len);
                 if (msg) {
+                    /* End TTS playback when receiving any text message */
+                    if (tts_playing) {
+                        ws_tts_complete();
+                    }
+
                     /* Check for server protocol formats first */
                     if (strncmp(msg, "result:", 7) == 0) {
                         /* ASR result: "result: {text}" */
@@ -52,8 +58,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                     else if (strcmp(msg, "tts:start") == 0) {
                         /* TTS start marker - prepare to receive audio */
                         ESP_LOGI(TAG, "TTS start, preparing audio playback");
-                        display_update(NULL, "speaking", 0, NULL);
-                        hal_audio_start();
+                        /* Don't start audio here - will start on first binary chunk */
                     }
                     else if (strncmp(msg, "error:", 6) == 0) {
                         /* Error message */
@@ -210,22 +215,19 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
         return;
     }
 
-    ESP_LOGI(TAG, "TTS audio received: %d bytes raw PCM", len);
-
-    /* Update display to speaking animation */
-    display_update(NULL, "speaking", 0, NULL);
-
-    /* Start audio playback if not already started */
-    hal_audio_start();
+    /* Only update display and start audio on first chunk */
+    if (!tts_playing) {
+        ESP_LOGI(TAG, "TTS started, first chunk: %d bytes", len);
+        display_update(NULL, "speaking", 0, NULL);
+        hal_audio_start();
+        tts_playing = true;
+    }
 
     /* Play raw PCM directly */
     int written = hal_audio_write(data, len);
     if (written != len) {
         ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
     }
-
-    /* Note: Don't stop audio here - may receive more frames */
-    /* Display will be updated by caller when TTS is complete */
 }
 
 /**
@@ -233,7 +235,10 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
  */
 void ws_tts_complete(void)
 {
-    hal_audio_stop();
-    display_update(NULL, "happy", 0, NULL);
-    ESP_LOGI(TAG, "TTS playback complete");
+    if (tts_playing) {
+        hal_audio_stop();
+        display_update(NULL, "happy", 0, NULL);
+        tts_playing = false;
+        ESP_LOGI(TAG, "TTS playback complete");
+    }
 }
