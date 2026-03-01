@@ -23,7 +23,20 @@
 
 ---
 
-## 动画状态映射表 (v2)
+## 动画状态映射表 (v2.0)
+
+### 协议状态 → 动画映射 (ws_handlers.c)
+
+| 协议状态关键词 | 动画 | 说明 |
+|----------------|------|------|
+| `processing` | analyzing | AI 正在处理 |
+| `thinking` | analyzing | AI 正在思考 |
+| `[thinking]` | analyzing | AI 思考中 (带标签) |
+| `speaking` | speaking | AI 正在说话 |
+| `idle` | standby | 空闲状态 |
+| `done` | happy | 处理完成 |
+| `error` | sad | 错误状态 |
+| `舵机动画` | NULL (不变) | 舵机动画状态 |
 
 ### 代码层 → SPIFFS 动画映射
 
@@ -40,19 +53,23 @@
 
 > **注意**: Speaking 动画临时使用 listening，因为 speaking PNG 文件是 240x240（其他是 412x412）
 
-### 实际使用场景
+### 实际使用场景 (Protocol v2.0)
 
-| 场景 | 调用位置 | emoji 参数 | 动画 |
-|------|----------|------------|------|
-| 启动完成 | `app_main.c` | "happy" | greeting |
-| WebSocket 连接成功 | `ws_client.c` | "happy" | greeting |
-| WebSocket 断开 | `ws_client.c` | "standby" | standby |
-| 按键按下（开始录音） | `app_main.c` | "listening" | listening |
-| 按键松开（处理中） | `app_main.c` | "analyzing" | analyzing |
-| ASR 结果 | `ws_client.c` | "analyzing" | analyzing |
-| TTS 播放 | `ws_client.c` | "speaking" | listening (temp) |
-| TTS 完成/超时 | `ws_client.c` | "happy" | greeting |
-| 错误 | `ws_client.c` | "sad" | detected |
+| 场景 | 消息来源 | 消息类型 | emoji 参数 | 动画 |
+|------|----------|----------|------------|------|
+| 启动完成 | `app_main.c` | - | "happy" | greeting |
+| WebSocket 连接成功 | `ws_client.c` | - | "happy" | greeting |
+| WebSocket 断开 | `ws_client.c` | - | "standby" | standby |
+| 按键按下（开始录音） | `app_main.c` | - | "listening" | listening |
+| 按键松开（处理中） | `app_main.c` | - | "analyzing" | analyzing |
+| ASR 识别结果 | 服务器 | `asr_result` | "analyzing" | analyzing |
+| Bot 回复 | 服务器 | `bot_reply` | 不变 | - |
+| 状态更新 (processing) | 服务器 | `status` | "analyzing" | analyzing |
+| 状态更新 (thinking) | 服务器 | `status` | "analyzing" | analyzing |
+| 状态更新 (speaking) | 服务器 | `status` | "speaking" | listening |
+| TTS 播放 | 服务器 | 二进制 PCM | "speaking" | listening |
+| TTS 完成 | 服务器 | `tts_end` | "happy" | greeting |
+| 错误 | 服务器 | `error` | "sad" | detected |
 
 ### 关键文件
 

@@ -19,33 +19,48 @@
 
 const char* ws_status_data_to_emoji(const char *data)
 {
-    if (!data) {
-        return "standby";
+    if (!data || data[0] == '\0') {
+        return NULL;  /* No change */
     }
 
     /* Check for status indicators in data string */
-    if (strstr(data, "[thinking]") != NULL) {
+
+    /* AI processing states - show analyzing animation */
+    if (strstr(data, "processing") != NULL) {
         return "analyzing";
     }
     if (strstr(data, "thinking") != NULL) {
         return "analyzing";
     }
+    if (strstr(data, "[thinking]") != NULL) {
+        return "analyzing";
+    }
+
+    /* Speaking state - show speaking animation */
     if (strstr(data, "speaking") != NULL) {
         return "speaking";
     }
+
+    /* Idle/done states - return to standby */
     if (strstr(data, "idle") != NULL) {
         return "standby";
     }
+    if (strstr(data, "done") != NULL) {
+        return "happy";
+    }
+
+    /* Error states */
     if (strstr(data, "error") != NULL) {
         return "sad";
     }
+
+    /* Servo animation status - no change */
     if (strstr(data, "舵机动画") != NULL) {
-        /* Servo animation status - keep current state */
         return NULL;
     }
 
-    /* Default to standby */
-    return "standby";
+    /* Default: no change */
+    return NULL;
 }
 
 /* ------------------------------------------------------------------ */
