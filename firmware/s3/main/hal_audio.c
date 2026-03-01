@@ -6,17 +6,18 @@
 
 #define TAG "HAL_AUDIO"
 
-static bool is_initialized = false;
+static bool codec_initialized = false;  /* codec init is global, only once */
+static bool is_running = false;         /* current running state */
 static esp_codec_dev_handle_t mic_handle = NULL;
 static esp_codec_dev_handle_t speaker_handle = NULL;
 
-int hal_audio_start(void)
+/* Initialize codec once at system startup */
+int hal_audio_init(void)
 {
-    if (is_initialized) {
+    if (codec_initialized) {
         return 0;
     }
 
-    /* Initialize codec using SDK */
     ESP_LOGI(TAG, "Initializing audio codec via SDK...");
 
     esp_err_t ret = bsp_codec_init();
@@ -39,21 +40,39 @@ int hal_audio_start(void)
         return -1;
     }
 
+    codec_initialized = true;
+    ESP_LOGI(TAG, "Audio codec initialized");
+    return 0;
+}
+
+int hal_audio_start(void)
+{
+    if (is_running) {
+        return 0;
+    }
+
+    /* Ensure codec is initialized */
+    if (!codec_initialized) {
+        if (hal_audio_init() != 0) {
+            return -1;
+        }
+    }
+
     /* Resume codec device */
-    ret = bsp_codec_dev_resume();
+    esp_err_t ret = bsp_codec_dev_resume();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to resume codec: %s", esp_err_to_name(ret));
         return -1;
     }
 
-    is_initialized = true;
-    ESP_LOGI(TAG, "Audio initialized via SDK");
+    is_running = true;
+    ESP_LOGI(TAG, "Audio started");
     return 0;
 }
 
 int hal_audio_read(uint8_t *out_buf, int max_len)
 {
-    if (!is_initialized || !mic_handle) {
+    if (!is_running || !mic_handle) {
         return -1;
     }
 
@@ -70,7 +89,7 @@ int hal_audio_read(uint8_t *out_buf, int max_len)
 
 int hal_audio_write(const uint8_t *data, int len)
 {
-    if (!is_initialized || !speaker_handle) {
+    if (!is_running || !speaker_handle) {
         return -1;
     }
 
@@ -87,7 +106,7 @@ int hal_audio_write(const uint8_t *data, int len)
 
 int hal_audio_stop(void)
 {
-    if (!is_initialized) {
+    if (!is_running) {
         return 0;
     }
 
@@ -96,7 +115,7 @@ int hal_audio_stop(void)
         ESP_LOGE(TAG, "Stop error: %s", esp_err_to_name(ret));
     }
 
-    is_initialized = false;
+    is_running = false;
     ESP_LOGI(TAG, "Audio stopped");
     return 0;
 }

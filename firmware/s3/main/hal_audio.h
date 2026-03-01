@@ -4,6 +4,12 @@
 #include <stdint.h>
 
 /**
+ * Initialize audio codec (call once at startup)
+ * This initializes ES7243 ADC and ES8311 DAC via I2C
+ */
+int hal_audio_init(void);
+
+/**
  * Start audio capture/playback
  */
 int hal_audio_start(void);

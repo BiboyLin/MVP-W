@@ -64,8 +64,13 @@ static int test_uart(void)
 static int test_audio(void)
 {
     ESP_LOGI(TAG, "[TEST] Audio...");
-    if (hal_audio_start() != 0) {
+    if (hal_audio_init() != 0) {
         ESP_LOGE(TAG, "[TEST] Audio init failed");
+        return -1;
+    }
+    /* Start audio to test I2S read */
+    if (hal_audio_start() != 0) {
+        ESP_LOGE(TAG, "[TEST] Audio start failed");
         return -1;
     }
     /* Read a small buffer to test I2S */
