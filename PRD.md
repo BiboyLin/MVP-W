@@ -162,7 +162,7 @@ Cloud (PC)                 Watcher (S3)              MCU
 :8766 (WS)  ◄─────────────────────────────────► WiFi 连接
 
 控制指令 (PC → Watcher → MCU):
-{"type": "servo", "x": 90, "y": 45}  ──────►  X:90\r\nY:45\r\n
+{"type": "servo", "x": 90, "y": 90}  ──────►  X:90\r\nY:90\r\n
 
 TTS 播放 (PC → Watcher):
 {"type": "tts", "format": "opus", "data": "<base64_opus>"}  ──► Opus 解码 → I2S 播放
@@ -426,7 +426,7 @@ class MessageType:
 {
     "type": "servo",
     "x": 90,
-    "y": 45
+    "y": 90
 }
 
 // TTS 播放 (PC 发送音频数据)

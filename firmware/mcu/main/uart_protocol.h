@@ -3,7 +3,7 @@
 /**
  * Parse one UART axis command (trailing \r\n already stripped).
  *
- * Expected format:  "X:90"  or  "Y:45"
+ * Expected format:  "X:90"  or  "Y:90"
  *   - axis  : 'X' or 'Y'
  *   - angle : 0-180 (inclusive)
  *

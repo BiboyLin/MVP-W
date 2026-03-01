@@ -26,9 +26,9 @@ void test_parse_x_axis(void)
 void test_parse_y_axis(void)
 {
     char axis; int angle;
-    TEST_ASSERT_EQUAL_INT(0, parse_axis_cmd("Y:45", &axis, &angle));
+    TEST_ASSERT_EQUAL_INT(0, parse_axis_cmd("Y:90", &axis, &angle));
     TEST_ASSERT_EQUAL_CHAR('Y', axis);
-    TEST_ASSERT_EQUAL_INT(45, angle);
+    TEST_ASSERT_EQUAL_INT(90, angle);
 }
 
 void test_parse_boundary_0(void)
@@ -57,7 +57,7 @@ void test_invalid_axis_lowercase(void)
 {
     char axis; int angle;
     TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("x:90", &axis, &angle));
-    TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("y:45", &axis, &angle));
+    TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("y:90", &axis, &angle));
 }
 
 /* ── angle out of range ──────────────────────────────────────────── */
@@ -82,7 +82,7 @@ void test_missing_separator(void)
 {
     char axis; int angle;
     TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("X90",     &axis, &angle));
-    TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("Y 45",    &axis, &angle));
+    TEST_ASSERT_NOT_EQUAL(0, parse_axis_cmd("Y 90",    &axis, &angle));
 }
 
 void test_empty_string(void)

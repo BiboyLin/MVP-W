@@ -145,9 +145,9 @@ I (xxx) HAL_AUDIO: Audio initialized
 ```c
 // After uart_bridge_init()
 ESP_LOGI(TAG, "Testing UART TX...");
-uart_bridge_send_servo(90, 45);
+uart_bridge_send_servo(90, 90);
 vTaskDelay(pdMS_TO_TICKS(1000));
-uart_bridge_send_servo(45, 90);
+uart_bridge_send_servo(90, 90);
 ```
 
 ### 串口命令测试 (可选)

@@ -56,7 +56,7 @@
 
 ```json
 // Cloud → Watcher
-{"type": "servo", "x": 90, "y": 45}
+{"type": "servo", "x": 90, "y": 90}
 ```
 
 **字段说明**：
@@ -67,7 +67,7 @@
 ```
 ws_router → on_servo_handler() → uart_bridge_send_servo(x, y)
                                      ↓
-                              UART: "X:90\r\nY:45\r\n"
+                              UART: "X:90\r\nY:90\r\n"
 ```
 
 ### 3.2 TTS 播放 (Cloud → Watcher)
@@ -271,7 +271,7 @@ def build_audio_frame(pcm_data: bytes) -> bytes:
 **示例**：
 ```
 X:90\r\n
-Y:45\r\n
+Y:90\r\n
 ```
 
 **说明**：
