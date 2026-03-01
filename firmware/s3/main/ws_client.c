@@ -40,10 +40,30 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
 
         case WEBSOCKET_EVENT_DATA:
             if (data->op_code == WS_TRANSPORT_OPCODES_TEXT) {
-                /* Route text message */
+                /* Handle server text messages */
                 char *msg = strndup((char *)data->data_ptr, data->data_len);
                 if (msg) {
-                    ws_route_message(msg);
+                    /* Check for server protocol formats first */
+                    if (strncmp(msg, "result:", 7) == 0) {
+                        /* ASR result: "result: {text}" */
+                        ESP_LOGI(TAG, "ASR result: %s", msg + 7);
+                        display_update(msg + 7, "analyzing", 0, NULL);
+                    }
+                    else if (strcmp(msg, "tts:start") == 0) {
+                        /* TTS start marker - prepare to receive audio */
+                        ESP_LOGI(TAG, "TTS start, preparing audio playback");
+                        display_update(NULL, "speaking", 0, NULL);
+                        hal_audio_start();
+                    }
+                    else if (strncmp(msg, "error:", 6) == 0) {
+                        /* Error message */
+                        ESP_LOGE(TAG, "Server error: %s", msg + 6);
+                        display_update("Error", "sad", 0, NULL);
+                    }
+                    else {
+                        /* Try JSON routing for other messages */
+                        ws_route_message(msg);
+                    }
                     free(msg);
                 }
             }
@@ -149,6 +169,7 @@ int ws_client_is_connected(void)
 int ws_send_audio(const uint8_t *data, int len)
 {
     if (!ws_client || !is_connected || len <= 0) {
+        ESP_LOGW(TAG, "ws_send_audio: not ready (conn=%d, len=%d)", is_connected, len);
         return -1;
     }
 
@@ -160,15 +181,13 @@ int ws_send_audio(const uint8_t *data, int len)
         return -1;
     }
 
-    ESP_LOGD(TAG, "Sent raw PCM: %d bytes", sent);
     return 0;
 }
 
 int ws_send_audio_end(void)
 {
-    /* Send audio end marker as JSON text frame */
-    const char *msg = "{\"type\":\"audio_end\"}";
-    return ws_client_send_text(msg);
+    /* Send audio end marker (适配 watcher-server 协议) */
+    return ws_client_send_text("over");
 }
 
 /* ------------------------------------------------------------------ */

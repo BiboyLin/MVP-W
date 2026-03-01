@@ -8,6 +8,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
+#include <math.h>
 
 #define TAG "VOICE"
 
@@ -73,11 +74,14 @@ void voice_recorder_get_stats(voice_stats_t *out_stats)
 
 static int start_recording(void)
 {
+    ESP_LOGI(TAG, "start_recording: calling hal_audio_start()");
     if (hal_audio_start() != 0) {
+        ESP_LOGE(TAG, "start_recording: hal_audio_start failed");
         g_stats.error_count++;
         return -1;
     }
     g_state = VOICE_STATE_RECORDING;
+    ESP_LOGI(TAG, "start_recording: state -> RECORDING");
     return 0;
 }
 
@@ -135,15 +139,42 @@ int voice_recorder_tick(void)
     /* Read audio samples (PCM: 16-bit, 16kHz, mono) */
     int pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
     if (pcm_len < 0) {
+        ESP_LOGE(TAG, "Audio read error");
         g_stats.error_count++;
         return -1;
     }
     if (pcm_len == 0) {
+        ESP_LOGW(TAG, "Audio read: no data");
         return 0;  /* No data available */
+    }
+
+    /* Audio quality check: calculate RMS and peak */
+    int16_t *samples = (int16_t *)g_pcm_buf;
+    int sample_count = pcm_len / 2;  /* 16-bit samples */
+    int64_t sum_sq = 0;
+    int16_t peak = 0;
+    int zero_count = 0;
+
+    for (int i = 0; i < sample_count; i++) {
+        int16_t s = samples[i];
+        if (s == 0) zero_count++;
+        if (s < 0) s = -s;  /* abs */
+        sum_sq += (int64_t)s * s;
+        if (s > peak) peak = s;
+    }
+
+    int rms = (int)(sum_sq / sample_count);
+    rms = (int)sqrt((double)rms);
+
+    /* Log every 10 frames */
+    if (g_stats.encode_count % 10 == 0) {
+        ESP_LOGI(TAG, "Audio: frame#%d, rms=%d, peak=%d, zeros=%d/%d",
+                 g_stats.encode_count + 1, rms, peak, zero_count, sample_count);
     }
 
     /* Send PCM directly via WebSocket (no encoding) */
     if (ws_send_audio(g_pcm_buf, pcm_len) != 0) {
+        ESP_LOGE(TAG, "WS send audio failed");
         g_stats.error_count++;
         return -1;
     }

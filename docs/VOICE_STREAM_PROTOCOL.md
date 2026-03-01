@@ -1,8 +1,8 @@
 # 语音流协议规范
 
-> **版本**: 1.1
+> **版本**: 1.2
 > **日期**: 2026-03-01
-> **范围**: 仅语音流音频数据格式
+> **范围**: 语音流（适配 watcher-server）
 
 ---
 
@@ -16,165 +16,135 @@
 | 声道 | Mono |
 | 字节序 | Little-endian |
 
-**带宽估算**: 16000 × 2 × 1 = 32KB/s ≈ 256kbps
-
 ---
 
-## 2. 音频上传 (S3 → Server)
+## 2. 客户端 → 服务器
 
-### 2.1 音频数据 - Raw PCM
+### 2.1 音频数据
 
 ```
 WebSocket Binary Frame
 ┌─────────────────────────┐
-│   Raw PCM Data (N B)    │  直接发送，无帧头
+│   Raw PCM Data (N B)    │
 └─────────────────────────┘
 ```
 
-**客户端实现**:
+### 2.2 录音结束
+
+```
+WebSocket Text Frame
+┌─────────────────────────┐
+│        "over"           │
+└─────────────────────────┘
+```
+
+---
+
+## 3. 服务器 → 客户端
+
+### 3.1 ASR 结果
+
+```
+WebSocket Text Frame
+┌─────────────────────────────────┐
+│   "result: 识别的文字内容"       │
+└─────────────────────────────────┘
+```
+
+### 3.2 TTS 开始
+
+```
+WebSocket Text Frame
+┌─────────────────────────┐
+│     "tts:start"         │
+└─────────────────────────┘
+```
+
+### 3.3 TTS 音频
+
+```
+WebSocket Binary Frame
+┌─────────────────────────┐
+│   Raw PCM Data (N B)    │
+└─────────────────────────┘
+```
+
+### 3.4 错误消息
+
+```
+WebSocket Text Frame
+┌─────────────────────────────────┐
+│   "error: 错误描述"              │
+└─────────────────────────────────┘
+```
+
+---
+
+## 4. 完整流程
+
+```
+[S3]                                    [Server]
+  │                                        │
+  │  1. 长按按钮 → Raw PCM chunks          │
+  │  ─────────────────────►                │
+  │                                        │
+  │  2. 松开按钮 → "over"                  │
+  │  ─────────────────────►                │
+  │                                        │
+  │                    3. ASR 识别          │
+  │  ◄─────────────────────                │
+  │     "result: 你好"                     │
+  │                                        │
+  │                    4. LLM 处理          │
+  │                                        │
+  │  5. TTS 准备                           │
+  │  ◄─────────────────────                │
+  │     "tts:start"                        │
+  │                                        │
+  │  6. TTS 音频流                          │
+  │  ◄─────────────────────                │
+  │     Raw PCM chunks                     │
+  │                                        │
+  ▼                                        ▼
+```
+
+---
+
+## 5. 客户端实现 (ws_client.c)
+
 ```c
-// ws_client.c
-int ws_send_audio(const uint8_t *pcm_data, int len) {
-    // 直接发送原始 PCM，无 AUD1 帧头
-    return esp_websocket_client_send_bin(ws_client, (const char *)pcm_data, len, portMAX_DELAY);
-}
-```
-
-### 2.2 录音结束标记 - 保持原协议
-
-```
-WebSocket Text Frame (JSON)
-┌─────────────────────────────────────┐
-│  {"type":"audio_end"}               │  保持原 JSON 格式
-└─────────────────────────────────────┘
-```
-
-**客户端实现** (保持不变):
-```c
-// ws_client.c
+// 录音结束
 int ws_send_audio_end(void) {
-    const char *msg = "{\"type\":\"audio_end\"}";
-    return esp_websocket_client_send_text(ws_client, msg, strlen(msg), portMAX_DELAY);
+    return ws_client_send_text("over");
 }
-```
 
----
+// 处理文本消息
+if (strncmp(msg, "result:", 7) == 0) {
+    display_update(msg + 7, "analyzing", 0, NULL);
+}
+else if (strcmp(msg, "tts:start") == 0) {
+    display_update(NULL, "speaking", 0, NULL);
+    hal_audio_start();
+}
+else if (strncmp(msg, "error:", 6) == 0) {
+    display_update("Error", "sad", 0, NULL);
+}
 
-## 3. TTS 下载 (Server → S3)
-
-### 3.1 TTS 音频数据 - Raw PCM
-
-```
-WebSocket Binary Frame
-┌─────────────────────────┐
-│   Raw PCM Data (N B)    │  直接播放，无帧头
-└─────────────────────────┘
-```
-
-**客户端实现**:
-```c
-// ws_client.c - 处理二进制消息
+// 处理二进制消息 (TTS 音频)
 void ws_handle_tts_binary(const uint8_t *data, int len) {
-    // 直接播放 PCM，无帧头解析
-    hal_audio_write(data, len);
+    hal_audio_write(data, len);  // 直接播放 Raw PCM
 }
 ```
 
-### 3.2 TTS 结束 - 保持原协议
+---
 
-服务器发送状态更新（JSON）：
-```json
-{"type": "status", "state": "idle", "message": "播放完成"}
-```
+## 6. 服务器配置
+
+| 配置项 | 值 |
+|--------|-----|
+| 端口 | **8766** (需修改 .env) |
+| IP | 192.168.31.10 |
 
 ---
 
-## 4. ASR 结果 - 保持原协议
-
-```
-WebSocket Text Frame (JSON)
-┌─────────────────────────────────────────────┐
-│  {"type":"status","state":"...","text":"识别内容"} │
-└─────────────────────────────────────────────┘
-```
-
----
-
-## 5. 完整流程
-
-```
-┌──────────────────────────────────────────────────────────────────┐
-│                        语音交互流程                               │
-├──────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│  [S3]                              [Server]                      │
-│    │                                    │                        │
-│    │  1. 用户长按按钮                    │                        │
-│    │  ─────────────────────►            │                        │
-│    │     Binary: Raw PCM chunks         │  ← 只有这里改          │
-│    │                                    │                        │
-│    │  2. 用户松开按钮                    │                        │
-│    │  ─────────────────────►            │                        │
-│    │     JSON: {"type":"audio_end"}     │  ← 保持原协议          │
-│    │                                    │                        │
-│    │                    3. ASR + LLM     │                        │
-│    │  ◄─────────────────────            │                        │
-│    │     JSON: {"type":"status",...}    │  ← 保持原协议          │
-│    │                                    │                        │
-│    │  4. TTS 音频流                      │                        │
-│    │  ◄─────────────────────            │                        │
-│    │     Binary: Raw PCM chunks         │  ← 只有这里改          │
-│    │                                    │                        │
-│    │  5. 播放完成                       │                        │
-│    │  ◄─────────────────────            │                        │
-│    │     JSON: {"type":"status","state":"idle"}                  │
-│    │                                    │                        │
-│    ▼                                    ▼                        │
-└──────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 6. 协议变更摘要
-
-### ✅ 需要修改（仅音频数据）
-
-| 功能 | 原协议 | 新协议 |
-|------|--------|--------|
-| 音频上传 | AUD1 帧 + PCM | **Raw PCM** |
-| TTS 音频 | AUD1 帧 + PCM | **Raw PCM** |
-
-### ❌ 保持不变（所有 JSON 协议）
-
-| 消息类型 | 方向 | 格式 |
-|----------|------|------|
-| 录音结束 | S3 → Server | `{"type":"audio_end"}` |
-| ASR 结果 | Server → S3 | `{"type":"status",...}` |
-| 舵机控制 | Server → S3 | `{"type":"servo","x":90,"y":90}` |
-| 显示更新 | Server → S3 | `{"type":"display","text":"...","emoji":"happy"}` |
-| 状态更新 | Server → S3 | `{"type":"status","state":"idle",...}` |
-| 拍照请求 | Server → S3 | `{"type":"capture","quality":80}` |
-
----
-
-## 7. 客户端修改清单
-
-| 文件 | 修改内容 |
-|------|----------|
-| `ws_client.c` | 音频上传：移除 AUD1 帧头，直接发 PCM |
-| `ws_client.c` | TTS 接收：移除 AUD1 解析，直接播放 PCM |
-
----
-
-## 8. 服务器端修改清单
-
-| 文件 | 修改内容 |
-|------|----------|
-| `websocket_server.py` | 音频接收：直接处理 Raw PCM |
-| `websocket_server.py` | 录音结束：识别 `{"type":"audio_end"}` |
-| `websocket_server.py` | ASR 结果：返回 JSON 格式 |
-| `websocket_server.py` | TTS 发送：直接发 Raw PCM |
-
----
-
-*确认后开始修改。*
+*版本 1.2 - 适配 watcher-server 协议*
