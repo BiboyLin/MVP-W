@@ -15,6 +15,11 @@
 #include "lvgl/src/extra/libs/png/lv_png.h"
 #endif
 
+/* External CJK font for Chinese character support */
+#if LV_FONT_SIMSUN_16_CJK
+extern lv_font_t lv_font_simsun_16_cjk;
+#endif
+
 #define TAG "HAL_DISPLAY"
 
 static lv_obj_t *label_text = NULL;
@@ -100,17 +105,26 @@ int hal_display_init(void)
     lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
 
-    /* 6. Create text label (above emoji) */
+    /* 6. Create emoji image FIRST (centered) - so it's in background */
+    img_emoji = lv_img_create(scr);
+    lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 40);
+
+    /* 7. Create text label AFTER emoji - so it's in foreground */
     label_text = lv_label_create(scr);
     lv_obj_set_width(label_text, 380);
     lv_label_set_long_mode(label_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(label_text, LV_TEXT_ALIGN_CENTER, 0);  /* Center align text */
     lv_label_set_text(label_text, "Ready");
     lv_obj_set_style_text_color(label_text, lv_color_white(), 0);
-    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -80);
+    lv_obj_align(label_text, LV_ALIGN_CENTER, 0, -140);  /* Move higher to avoid emoji overlap */
 
-    /* 7. Create emoji image (centered) */
-    img_emoji = lv_img_create(scr);
-    lv_obj_align(img_emoji, LV_ALIGN_CENTER, 0, 40);
+    /* Set CJK font for Chinese character support */
+#if LV_FONT_SIMSUN_16_CJK
+    lv_obj_set_style_text_font(label_text, &lv_font_simsun_16_cjk, 0);
+    ESP_LOGI(TAG, "Using SimSun 16 CJK font for Chinese support");
+#else
+    ESP_LOGW(TAG, "CJK font not enabled, Chinese characters may not display");
+#endif
 
     /* 8. Initialize animation system */
     if (emoji_anim_init(img_emoji) == 0) {
@@ -134,11 +148,21 @@ int hal_display_set_text(const char *text, int font_size)
         return -1;
     }
 
-    /* Update label text */
-    lv_label_set_text(label_text, text);
+    /* Truncate text to max 30 chars to fit display boundary */
+    #define MAX_DISPLAY_CHARS 30
+    char truncated[MAX_DISPLAY_CHARS + 4];  /* +4 for "..." and null */
+    int len = strlen(text);
 
-    /* Note: font_size is ignored for now, uses default font */
-    ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
+    if (len > MAX_DISPLAY_CHARS) {
+        strncpy(truncated, text, MAX_DISPLAY_CHARS);
+        strcpy(truncated + MAX_DISPLAY_CHARS, "...");
+        lv_label_set_text(label_text, truncated);
+        ESP_LOGI(TAG, "Set text (truncated): '%s' -> '%s'", text, truncated);
+    } else {
+        lv_label_set_text(label_text, text);
+        ESP_LOGI(TAG, "Set text: '%s' (size %d)", text, font_size);
+    }
+
     return 0;
 }
 
