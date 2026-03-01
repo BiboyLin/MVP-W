@@ -36,7 +36,7 @@ static void on_button_long_release(void)
 {
     ESP_LOGI(TAG, "Button LONG RELEASE - stop recording");
     voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
-    display_update("Ready", "happy", 0, NULL);
+    display_update("Processing...", "analyzing", 0, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,11 +186,14 @@ void app_main(void)
     ESP_LOGI(TAG, "Ready");
     display_update("Ready", "happy", 0, NULL);
 
-    /* Main loop - feed watchdog only (voice_recorder_tick is handled in voice_recorder_task) */
+    /* Main loop - feed watchdog and check TTS timeout */
     esp_task_wdt_add(NULL);
     while (1) {
         /* Feed watchdog */
         esp_task_wdt_reset();
+
+        /* Check TTS timeout - auto-complete if no data for 2s */
+        ws_tts_timeout_check();
 
         /* Short delay for responsiveness */
         vTaskDelay(pdMS_TO_TICKS(100));

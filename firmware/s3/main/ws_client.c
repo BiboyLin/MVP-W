@@ -4,6 +4,7 @@
 #include "hal_audio.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdlib.h>
@@ -14,10 +15,12 @@
 /* WebSocket configuration (MVP: hardcoded) */
 #define WS_SERVER_URL  "ws://192.168.31.10:8766"
 #define WS_TIMEOUT_MS  10000
+#define TTS_TIMEOUT_MS 2000  /* TTS stream timeout - no data for 2s means complete */
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
 static bool tts_playing = false;  /* TTS playback state */
+static int64_t tts_last_data_time = 0;  /* Last TTS data timestamp */
 
 static void ws_event_handler(void *handler_args, esp_event_base_t base,
                              int32_t event_id, void *event_data)
@@ -227,6 +230,9 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
         tts_playing = true;
     }
 
+    /* Update last data timestamp for timeout detection */
+    tts_last_data_time = esp_timer_get_time();
+
     /* Play raw PCM directly */
     ESP_LOGI(TAG, "Calling hal_audio_write(%d bytes)...", len);
     int written = hal_audio_write(data, len);
@@ -238,15 +244,40 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
 
 /**
  * Signal TTS playback complete (called by application)
+ * Waits for I2S DMA buffer to finish playing before switching state
  */
 void ws_tts_complete(void)
 {
     if (tts_playing) {
+        /* Wait for I2S DMA buffer to finish playing (~500ms buffer) */
+        vTaskDelay(pdMS_TO_TICKS(500));
+
         hal_audio_stop();
         /* Restore 16kHz for recording */
         hal_audio_set_sample_rate(16000);
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
         ESP_LOGI(TAG, "TTS playback complete");
+    }
+}
+
+/**
+ * @brief Check TTS timeout and auto-complete if needed
+ *
+ * Call this periodically from main loop. If no TTS data received
+ * for TTS_TIMEOUT_MS, auto-complete the playback.
+ */
+void ws_tts_timeout_check(void)
+{
+    if (!tts_playing || tts_last_data_time == 0) {
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    int64_t elapsed_ms = (now - tts_last_data_time) / 1000;
+
+    if (elapsed_ms > TTS_TIMEOUT_MS) {
+        ESP_LOGI(TAG, "TTS timeout (%lld ms), auto-completing", elapsed_ms);
+        ws_tts_complete();
     }
 }

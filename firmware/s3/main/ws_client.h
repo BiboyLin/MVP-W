@@ -65,4 +65,10 @@ void ws_handle_tts_binary(const uint8_t *data, int len);
  */
 void ws_tts_complete(void);
 
+/**
+ * Check TTS timeout and auto-complete if needed
+ * Call this periodically from main loop
+ */
+void ws_tts_timeout_check(void);
+
 #endif /* WS_CLIENT_H */

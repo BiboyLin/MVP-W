@@ -33,7 +33,7 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id)
      *              5=listening, 6=analyzing, 7=speaking */
     /* emoji_png.h: 0=greeting, 1=detecting, 2=detected, 3=speaking,
      *              4=listening, 5=analyzing, 6=standby */
-    /* NOTE: speaking PNGs are 240x240 (wrong size), temporarily use analyzing */
+    /* NOTE: speaking PNGs are 240x240 (wrong size), temporarily use listening */
     switch (ui_emoji_id) {
         case 0:  /* EMOJI_STANDBY */   return EMOJI_ANIM_STANDBY;    /* standby */
         case 1:  /* EMOJI_HAPPY */     return EMOJI_ANIM_GREETING;   /* greeting */
@@ -42,7 +42,7 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id)
         case 4:  /* EMOJI_ANGRY */     return EMOJI_ANIM_ANALYZING;  /* analyzing */
         case 5:  /* EMOJI_LISTENING */ return EMOJI_ANIM_LISTENING;  /* listening */
         case 6:  /* EMOJI_ANALYZING */ return EMOJI_ANIM_ANALYZING;  /* analyzing */
-        case 7:  /* EMOJI_SPEAKING */  return EMOJI_ANIM_ANALYZING;  /* analyzing (temp) */
+        case 7:  /* EMOJI_SPEAKING */  return EMOJI_ANIM_LISTENING;  /* listening (temp) */
         default: return EMOJI_ANIM_STANDBY;
     }
 }
