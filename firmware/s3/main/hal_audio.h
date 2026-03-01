@@ -35,4 +35,10 @@ int hal_audio_write(const uint8_t *data, int len);
  */
 int hal_audio_stop(void);
 
+/**
+ * Set sample rate for playback (call before TTS playback)
+ * @param sample_rate Sample rate in Hz (e.g., 16000, 24000)
+ */
+void hal_audio_set_sample_rate(uint32_t sample_rate);
+
 #endif /* HAL_AUDIO_H */

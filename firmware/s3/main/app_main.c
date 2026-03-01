@@ -149,6 +149,11 @@ void app_main(void)
     /* 3. Initialize voice recorder */
     voice_recorder_init();
 
+    /* 3.1 Start voice recorder task (handles audio tick and button poll) */
+    if (voice_recorder_start() != 0) {
+        ESP_LOGE(TAG, "Failed to start voice recorder task");
+    }
+
     /* 3.5 Register button callbacks (SDK already initialized IO expander) */
     bsp_set_btn_long_press_cb(on_button_long_press);
     bsp_set_btn_long_release_cb(on_button_long_release);
@@ -181,16 +186,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Ready");
     display_update("Ready", "happy", 0, NULL);
 
-    /* Main loop - process audio, feed watchdog */
+    /* Main loop - feed watchdog only (voice_recorder_tick is handled in voice_recorder_task) */
     esp_task_wdt_add(NULL);
     while (1) {
-        /* Process audio if recording */
-        voice_recorder_tick();
-
         /* Feed watchdog */
         esp_task_wdt_reset();
 
-        /* Short delay for responsiveness (60ms for audio frame rate) */
-        vTaskDelay(pdMS_TO_TICKS(60));
+        /* Short delay for responsiveness */
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

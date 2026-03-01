@@ -19,8 +19,8 @@ void app_main(void)
     /* 2. Startup: 3 blinks = boot OK */
     led_blink(3, 200);
 
-    /* 3. Move servos to center (90/90) */
-    servo_smooth_move(90, 90, 500);
+    /* 3. Move servos to default position (X:90, Y:120) */
+    servo_smooth_move(90, 120, 500);
 
     /* 4. Solid LED = ready */
     led_set(true);

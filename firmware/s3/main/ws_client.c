@@ -92,8 +92,8 @@ int ws_client_init(void)
     esp_websocket_client_config_t cfg = {
         .uri = WS_SERVER_URL,
         .network_timeout_ms = WS_TIMEOUT_MS,
-        .buffer_size = 8192,  /* Increased for audio streaming */
-        .task_stack = 8192,   /* Increased stack size */
+        .buffer_size = 16384,  /* Increased for audio streaming (16KB) */
+        .task_stack = 16384,   /* Increased stack size (16KB) */
     };
 
     ws_client = esp_websocket_client_init(&cfg);
@@ -180,7 +180,8 @@ int ws_send_audio(const uint8_t *data, int len)
     }
 
     /* Send raw PCM directly, no AUD1 header */
-    int sent = esp_websocket_client_send_bin(ws_client, (const char *)data, len, pdMS_TO_TICKS(1000));
+    /* Increased timeout to 5 seconds for better reliability */
+    int sent = esp_websocket_client_send_bin(ws_client, (const char *)data, len, pdMS_TO_TICKS(5000));
 
     if (sent != len) {
         ESP_LOGW(TAG, "Audio send incomplete: %d/%d", sent, len);
@@ -220,12 +221,16 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
     if (!tts_playing) {
         ESP_LOGI(TAG, "TTS started, first chunk: %d bytes", len);
         display_update(NULL, "speaking", 0, NULL);
+        /* Switch to 24kHz for TTS playback (火山引擎 TTS) */
+        hal_audio_set_sample_rate(24000);
         hal_audio_start();
         tts_playing = true;
     }
 
     /* Play raw PCM directly */
+    ESP_LOGI(TAG, "Calling hal_audio_write(%d bytes)...", len);
     int written = hal_audio_write(data, len);
+    ESP_LOGI(TAG, "hal_audio_write returned: %d", written);
     if (written != len) {
         ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
     }
@@ -238,6 +243,8 @@ void ws_tts_complete(void)
 {
     if (tts_playing) {
         hal_audio_stop();
+        /* Restore 16kHz for recording */
+        hal_audio_set_sample_rate(16000);
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
         ESP_LOGI(TAG, "TTS playback complete");

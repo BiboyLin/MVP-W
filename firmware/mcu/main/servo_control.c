@@ -16,7 +16,11 @@
 /* Smooth-move step interval */
 #define STEP_MS         10
 
-static int s_angle[2] = {90, 90};  /* current commanded angles */
+/* Y-axis mechanical protection limits */
+#define SERVO_Y_MIN     90
+#define SERVO_Y_MAX     150
+
+static int s_angle[2] = {90, 120};  /* current commanded angles */
 
 /* ------------------------------------------------------------------ */
 
@@ -43,7 +47,7 @@ void servo_control_init(void)
 
     ledc_channel_config_t ch_y = {
         .channel    = LEDC_CH_Y,
-        .duty       = angle_to_duty(90),
+        .duty       = angle_to_duty(120),
         .gpio_num   = SERVO_Y_GPIO,
         .speed_mode = LEDC_MODE,
         .hpoint     = 0,
@@ -56,8 +60,16 @@ void servo_control_init(void)
 
 void servo_set_angle(servo_axis_t axis, int angle)
 {
+    /* Global limits */
     if (angle < 0)   angle = 0;
     if (angle > 180) angle = 180;
+
+    /* Y-axis mechanical protection */
+    if (axis == SERVO_Y) {
+        if (angle < SERVO_Y_MIN) angle = SERVO_Y_MIN;
+        if (angle > SERVO_Y_MAX) angle = SERVO_Y_MAX;
+    }
+
     s_angle[axis] = angle;
 
     ledc_channel_t ch = (axis == SERVO_X) ? LEDC_CH_X : LEDC_CH_Y;
