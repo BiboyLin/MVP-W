@@ -4,29 +4,38 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Message types (from PRD.md) */
+/* Message types (Protocol v2.0) */
 typedef enum {
     WS_MSG_UNKNOWN = 0,
 
-    /* Control commands (Cloud -> Watcher) */
-    WS_MSG_SERVO,           /* {"type": "servo", "x": 90, "y": 45} */
-    WS_MSG_TTS,             /* {"type": "tts", "format": "opus", "data": "<base64>"} */
-    WS_MSG_DISPLAY,         /* {"type": "display", "text": "...", "emoji": "happy", "size": 24} */
-    WS_MSG_CAPTURE,         /* {"type": "capture", "quality": 80} */
-    WS_MSG_STATUS,          /* {"type": "status", "state": "thinking", "message": "..."} */
-    WS_MSG_REBOOT,          /* {"type": "reboot"} */
+    /* Control commands (Cloud -> Watcher) - v2.0 format */
+    WS_MSG_SERVO,           /* {"type": "servo", "code": 0, "data": {"x": 90, "y": 45}} */
+    WS_MSG_DISPLAY,         /* {"type": "display", "code": 0, "data": {"text": "...", "emoji": "happy"}} */
+    WS_MSG_CAPTURE,         /* {"type": "capture", "code": 0, "data": {"quality": 80}} */
+    WS_MSG_STATUS,          /* {"type": "status", "code": 0, "data": "状态描述"} */
+    WS_MSG_REBOOT,          /* {"type": "reboot", "code": 0, "data": null} */
+
+    /* New message types - v2.0 */
+    WS_MSG_ASR_RESULT,      /* {"type": "asr_result", "code": 0, "data": "识别文本"} */
+    WS_MSG_BOT_REPLY,       /* {"type": "bot_reply", "code": 0, "data": "AI回复"} */
+    WS_MSG_TTS_END,         /* {"type": "tts_end", "code": 0, "data": "ok"} */
+    WS_MSG_ERROR_MSG,       /* {"type": "error", "code": 1, "data": "错误描述"} */
 
     /* Media streams (Watcher -> Cloud) */
-    WS_MSG_AUDIO,           /* {"type": "audio", "format": "opus", "sample_rate": 16000, "data": "<base64>"} */
-    WS_MSG_AUDIO_END,       /* {"type": "audio_end"} */
-    WS_MSG_VIDEO,           /* {"type": "video", "format": "jpeg", "width": 412, "height": 412, "data": "<base64>"} */
-    WS_MSG_SENSOR,          /* {"type": "sensor", "co2": 400, "temperature": 25.5, "humidity": 60} */
+    WS_MSG_AUDIO,           /* Binary PCM 16kHz */
+    WS_MSG_AUDIO_END,       /* "over" text */
+    WS_MSG_VIDEO,           /* {"type": "video", ...} */
+    WS_MSG_SENSOR,          /* {"type": "sensor", ...} */
 
     /* System messages */
     WS_MSG_PING,
     WS_MSG_PONG,
     WS_MSG_ERROR,
     WS_MSG_CONNECTED,
+
+    /* Legacy (deprecated) */
+    WS_MSG_TTS,             /* Use binary frames instead */
+    WS_MSG_STATUS_OLD,      /* Old format with state/message fields */
 } ws_msg_type_t;
 
 /* Servo command structure */
@@ -34,13 +43,6 @@ typedef struct {
     int x;  /* 0-180 */
     int y;  /* 0-180 */
 } ws_servo_cmd_t;
-
-/* TTS command structure */
-typedef struct {
-    char format[16];        /* "opus" */
-    const char *data_b64;   /* base64 encoded opus data (pointer to original JSON, valid during callback only) */
-    int data_len;           /* length of data_b64 string */
-} ws_tts_cmd_t;
 
 /* Display command structure */
 #define WS_DISPLAY_TEXT_MAX  128
@@ -51,59 +53,72 @@ typedef struct {
     int size;                         /* font size (default 24) */
 } ws_display_cmd_t;
 
-/* Status command structure */
-#define WS_STATUS_STATE_MAX   16
-#define WS_STATUS_MESSAGE_MAX 256
+/* Status command structure (v2.0 - data is string) */
+#define WS_STATUS_DATA_MAX 256
 typedef struct {
-    char state[WS_STATUS_STATE_MAX];    /* thinking/speaking/idle/error */
-    char message[WS_STATUS_MESSAGE_MAX]; /* status message */
+    char data[WS_STATUS_DATA_MAX];  /* status description string */
 } ws_status_cmd_t;
+
+/* ASR result structure (v2.0) */
+#define WS_TEXT_DATA_MAX 256
+typedef struct {
+    char text[WS_TEXT_DATA_MAX];  /* recognized text */
+} ws_asr_result_cmd_t;
+
+/* Bot reply structure (v2.0) */
+typedef struct {
+    char text[WS_TEXT_DATA_MAX];  /* AI reply text */
+} ws_bot_reply_cmd_t;
+
+/* Error message structure (v2.0) */
+typedef struct {
+    int code;                       /* error code (non-zero) */
+    char message[WS_TEXT_DATA_MAX]; /* error description */
+} ws_error_cmd_t;
 
 /* Capture command structure */
 typedef struct {
     int quality;            /* JPEG quality (1-100) */
 } ws_capture_cmd_t;
 
-/* Audio stream structure */
+/* Legacy structures (deprecated) */
 typedef struct {
-    const char *format;     /* "opus" */
-    int sample_rate;        /* 16000 */
-    const char *data_b64;   /* base64 encoded opus data */
-    int data_len;           /* length of data_b64 string */
-} ws_audio_cmd_t;
+    char format[16];
+    const char *data_b64;
+    int data_len;
+} ws_tts_cmd_t;
 
-/* Video stream structure */
 typedef struct {
-    const char *format;     /* "jpeg" */
-    int width;
-    int height;
-    const char *data_b64;   /* base64 encoded jpeg data */
-    int data_len;           /* length of data_b64 string */
-} ws_video_cmd_t;
-
-/* Sensor data structure */
-typedef struct {
-    int co2;
-    float temperature;
-    float humidity;
-} ws_sensor_cmd_t;
+    char state[16];
+    char message[256];
+} ws_status_old_cmd_t;
 
 /* Handler function types (to be implemented by application) */
 typedef void (*ws_servo_handler_t)(const ws_servo_cmd_t *cmd);
-typedef void (*ws_tts_handler_t)(const ws_tts_cmd_t *cmd);
 typedef void (*ws_display_handler_t)(const ws_display_cmd_t *cmd);
 typedef void (*ws_status_handler_t)(const ws_status_cmd_t *cmd);
 typedef void (*ws_capture_handler_t)(const ws_capture_cmd_t *cmd);
 typedef void (*ws_reboot_handler_t)(void);
 
+/* New handler types - v2.0 */
+typedef void (*ws_asr_result_handler_t)(const ws_asr_result_cmd_t *cmd);
+typedef void (*ws_bot_reply_handler_t)(const ws_bot_reply_cmd_t *cmd);
+typedef void (*ws_tts_end_handler_t)(void);
+typedef void (*ws_error_handler_t)(const ws_error_cmd_t *cmd);
+
 /* Router context */
 typedef struct {
     ws_servo_handler_t   on_servo;
-    ws_tts_handler_t     on_tts;
     ws_display_handler_t on_display;
     ws_status_handler_t  on_status;
     ws_capture_handler_t on_capture;
     ws_reboot_handler_t  on_reboot;
+
+    /* New handlers - v2.0 */
+    ws_asr_result_handler_t on_asr_result;
+    ws_bot_reply_handler_t  on_bot_reply;
+    ws_tts_end_handler_t    on_tts_end;
+    ws_error_handler_t      on_error;
 } ws_router_t;
 
 /**
@@ -112,14 +127,14 @@ typedef struct {
 void ws_router_init(ws_router_t *router);
 
 /**
- * Route a JSON message to appropriate handler
+ * Route a JSON message to appropriate handler (v2.0 format)
  * @param json_str Null-terminated JSON string
  * @return Message type, or WS_MSG_UNKNOWN on parse error
  */
 ws_msg_type_t ws_route_message(const char *json_str);
 
 /**
- * Parse servo command from JSON
+ * Parse servo command from JSON (v2.0 format)
  * @param json_str JSON string
  * @param out_cmd Output structure
  * @return 0 on success, -1 on error
@@ -135,11 +150,35 @@ int ws_parse_servo(const char *json_str, ws_servo_cmd_t *out_cmd);
 int ws_parse_display(const char *json_str, ws_display_cmd_t *out_cmd);
 
 /**
- * Parse status command from JSON
+ * Parse status command from JSON (v2.0 format)
  * @param json_str JSON string
  * @param out_cmd Output structure
  * @return 0 on success, -1 on error
  */
 int ws_parse_status(const char *json_str, ws_status_cmd_t *out_cmd);
+
+/**
+ * Parse ASR result from JSON (v2.0 format)
+ * @param json_str JSON string
+ * @param out_cmd Output structure
+ * @return 0 on success, -1 on error
+ */
+int ws_parse_asr_result(const char *json_str, ws_asr_result_cmd_t *out_cmd);
+
+/**
+ * Parse bot reply from JSON (v2.0 format)
+ * @param json_str JSON string
+ * @param out_cmd Output structure
+ * @return 0 on success, -1 on error
+ */
+int ws_parse_bot_reply(const char *json_str, ws_bot_reply_cmd_t *out_cmd);
+
+/**
+ * Parse error message from JSON (v2.0 format)
+ * @param json_str JSON string
+ * @param out_cmd Output structure
+ * @return 0 on success, -1 on error
+ */
+int ws_parse_error(const char *json_str, ws_error_cmd_t *out_cmd);
 
 #endif /* WS_ROUTER_H */

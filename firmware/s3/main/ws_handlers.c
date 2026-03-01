@@ -1,6 +1,6 @@
 /**
  * @file ws_handlers.c
- * @brief WebSocket message handlers implementation
+ * @brief WebSocket message handlers implementation (Protocol v2.0)
  */
 
 #include "ws_handlers.h"
@@ -8,32 +8,43 @@
 #include "uart_bridge.h"
 #include "display_ui.h"
 #include "esp_system.h"
+#include "esp_log.h"
 #include <string.h>
 
+#define TAG "WS_HANDLERS"
+
 /* ------------------------------------------------------------------ */
-/* Helper: State to Emoji Mapping                                     */
+/* Helper: Parse status data to determine emoji                       */
 /* ------------------------------------------------------------------ */
 
-const char* ws_state_to_emoji(const char *state)
+const char* ws_status_data_to_emoji(const char *data)
 {
-    if (!state) {
+    if (!data) {
         return "standby";
     }
 
-    if (strcmp(state, "thinking") == 0) {
+    /* Check for status indicators in data string */
+    if (strstr(data, "[thinking]") != NULL) {
         return "analyzing";
     }
-    if (strcmp(state, "speaking") == 0) {
+    if (strstr(data, "thinking") != NULL) {
+        return "analyzing";
+    }
+    if (strstr(data, "speaking") != NULL) {
         return "speaking";
     }
-    if (strcmp(state, "idle") == 0) {
+    if (strstr(data, "idle") != NULL) {
         return "standby";
     }
-    if (strcmp(state, "error") == 0) {
+    if (strstr(data, "error") != NULL) {
         return "sad";
     }
+    if (strstr(data, "舵机动画") != NULL) {
+        /* Servo animation status - keep current state */
+        return NULL;
+    }
 
-    /* Unknown state defaults to standby */
+    /* Default to standby */
     return "standby";
 }
 
@@ -46,6 +57,8 @@ void on_servo_handler(const ws_servo_cmd_t *cmd)
     if (!cmd) {
         return;
     }
+
+    ESP_LOGI(TAG, "Servo command: x=%d, y=%d", cmd->x, cmd->y);
 
     /* Forward to MCU via UART */
     uart_bridge_send_servo(cmd->x, cmd->y);
@@ -72,7 +85,7 @@ void on_display_handler(const ws_display_cmd_t *cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Handler: Status Command                                            */
+/* Handler: Status Command (v2.0)                                     */
 /* ------------------------------------------------------------------ */
 
 void on_status_handler(const ws_status_cmd_t *cmd)
@@ -81,15 +94,14 @@ void on_status_handler(const ws_status_cmd_t *cmd)
         return;
     }
 
-    /* Map state to emoji */
-    const char *emoji = ws_state_to_emoji(cmd->state);
+    ESP_LOGI(TAG, "Status: %s", cmd->data);
 
-    /* Update display with message and appropriate emoji */
-    display_update(cmd->message, emoji, 0, NULL);
+    /* Map status data to emoji */
+    const char *emoji = ws_status_data_to_emoji(cmd->data);
 
-    /* Stop TTS audio when transitioning to idle state */
-    if (strcmp(cmd->state, "idle") == 0) {
-        ws_tts_complete();
+    /* Update display with status data and appropriate emoji */
+    if (emoji) {
+        display_update(cmd->data, emoji, 0, NULL);
     }
 }
 
@@ -109,7 +121,68 @@ void on_capture_handler(const ws_capture_cmd_t *cmd)
 
 void on_reboot_handler(void)
 {
+    ESP_LOGI(TAG, "Reboot command received");
     esp_restart();
+}
+
+/* ------------------------------------------------------------------ */
+/* Handler: ASR Result (v2.0)                                         */
+/* ------------------------------------------------------------------ */
+
+void on_asr_result_handler(const ws_asr_result_cmd_t *cmd)
+{
+    if (!cmd) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "ASR result: %s", cmd->text);
+
+    /* Display recognized text with analyzing animation */
+    display_update(cmd->text, "analyzing", 0, NULL);
+}
+
+/* ------------------------------------------------------------------ */
+/* Handler: Bot Reply (v2.0)                                          */
+/* ------------------------------------------------------------------ */
+
+void on_bot_reply_handler(const ws_bot_reply_cmd_t *cmd)
+{
+    if (!cmd) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Bot reply: %s", cmd->text);
+
+    /* Optional: Display bot reply text */
+    /* The TTS audio will follow, so we don't change animation here */
+}
+
+/* ------------------------------------------------------------------ */
+/* Handler: TTS End (v2.0)                                            */
+/* ------------------------------------------------------------------ */
+
+void on_tts_end_handler(void)
+{
+    ESP_LOGI(TAG, "TTS end received");
+
+    /* Complete TTS playback and switch to happy */
+    ws_tts_complete();
+}
+
+/* ------------------------------------------------------------------ */
+/* Handler: Error Message (v2.0)                                      */
+/* ------------------------------------------------------------------ */
+
+void on_error_handler(const ws_error_cmd_t *cmd)
+{
+    if (!cmd) {
+        return;
+    }
+
+    ESP_LOGE(TAG, "Error (code %d): %s", cmd->code, cmd->message);
+
+    /* Display error state */
+    display_update(cmd->message, "sad", 0, NULL);
 }
 
 /* ------------------------------------------------------------------ */
@@ -120,11 +193,16 @@ ws_router_t ws_handlers_get_router(void)
 {
     ws_router_t router = {
         .on_servo   = on_servo_handler,
-        .on_tts     = NULL,  /* TTS uses binary frames, not JSON */
         .on_display = on_display_handler,
         .on_status  = on_status_handler,
         .on_capture = on_capture_handler,
         .on_reboot  = on_reboot_handler,
+
+        /* New handlers - v2.0 */
+        .on_asr_result = on_asr_result_handler,
+        .on_bot_reply  = on_bot_reply_handler,
+        .on_tts_end    = on_tts_end_handler,
+        .on_error      = on_error_handler,
     };
     return router;
 }

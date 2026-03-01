@@ -1,3 +1,8 @@
+/**
+ * @file ws_router.c
+ * @brief WebSocket message router implementation (Protocol v2.0)
+ */
+
 #include "ws_router.h"
 #include "cJSON.h"
 #include <string.h>
@@ -46,7 +51,7 @@ static int get_int(cJSON *obj, const char *key, int default_val)
 }
 
 /* ------------------------------------------------------------------ */
-/* Private: Copy string to fixed buffer safely                         */
+/* Private: Copy string to fixed buffer safely                        */
 /* ------------------------------------------------------------------ */
 
 static void copy_string(char *dst, size_t dst_size, const char *src)
@@ -61,7 +66,7 @@ static void copy_string(char *dst, size_t dst_size, const char *src)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Route message to appropriate handler                       */
+/* Public: Route message to appropriate handler (v2.0 format)         */
 /* ------------------------------------------------------------------ */
 
 ws_msg_type_t ws_route_message(const char *json_str)
@@ -88,47 +93,80 @@ ws_msg_type_t ws_route_message(const char *json_str)
     if (strcmp(type, "servo") == 0) {
         msg_type = WS_MSG_SERVO;
         if (g_router.on_servo) {
-            ws_servo_cmd_t cmd = {
-                .x = get_int(root, "x", 90),
-                .y = get_int(root, "y", 90),
-            };
-            g_router.on_servo(&cmd);
-        }
-    }
-    else if (strcmp(type, "tts") == 0) {
-        msg_type = WS_MSG_TTS;
-        if (g_router.on_tts) {
-            ws_tts_cmd_t cmd = {0};
-            copy_string(cmd.format, sizeof(cmd.format), get_string(root, "format"));
-            cmd.data_b64 = get_string(root, "data");
-            cmd.data_len = cmd.data_b64 ? (int)strlen(cmd.data_b64) : 0;
-            g_router.on_tts(&cmd);
+            /* v2.0 format: data.x, data.y */
+            cJSON *data = cJSON_GetObjectItem(root, "data");
+            if (data && cJSON_IsObject(data)) {
+                ws_servo_cmd_t cmd = {
+                    .x = get_int(data, "x", 90),
+                    .y = get_int(data, "y", 90),
+                };
+                g_router.on_servo(&cmd);
+            }
         }
     }
     else if (strcmp(type, "display") == 0) {
         msg_type = WS_MSG_DISPLAY;
         if (g_router.on_display) {
-            ws_display_cmd_t cmd = {0};
-            copy_string(cmd.text, sizeof(cmd.text), get_string(root, "text"));
-            copy_string(cmd.emoji, sizeof(cmd.emoji), get_string(root, "emoji"));
-            cmd.size = get_int(root, "size", 0);
-            g_router.on_display(&cmd);
+            cJSON *data = cJSON_GetObjectItem(root, "data");
+            if (data && cJSON_IsObject(data)) {
+                ws_display_cmd_t cmd = {0};
+                copy_string(cmd.text, sizeof(cmd.text), get_string(data, "text"));
+                copy_string(cmd.emoji, sizeof(cmd.emoji), get_string(data, "emoji"));
+                cmd.size = get_int(data, "size", 0);
+                g_router.on_display(&cmd);
+            }
         }
     }
     else if (strcmp(type, "status") == 0) {
         msg_type = WS_MSG_STATUS;
         if (g_router.on_status) {
+            /* v2.0 format: data is string */
+            const char *data_str = get_string(root, "data");
             ws_status_cmd_t cmd = {0};
-            copy_string(cmd.state, sizeof(cmd.state), get_string(root, "state"));
-            copy_string(cmd.message, sizeof(cmd.message), get_string(root, "message"));
+            copy_string(cmd.data, sizeof(cmd.data), data_str);
             g_router.on_status(&cmd);
+        }
+    }
+    else if (strcmp(type, "asr_result") == 0) {
+        msg_type = WS_MSG_ASR_RESULT;
+        if (g_router.on_asr_result) {
+            const char *data_str = get_string(root, "data");
+            ws_asr_result_cmd_t cmd = {0};
+            copy_string(cmd.text, sizeof(cmd.text), data_str);
+            g_router.on_asr_result(&cmd);
+        }
+    }
+    else if (strcmp(type, "bot_reply") == 0) {
+        msg_type = WS_MSG_BOT_REPLY;
+        if (g_router.on_bot_reply) {
+            const char *data_str = get_string(root, "data");
+            ws_bot_reply_cmd_t cmd = {0};
+            copy_string(cmd.text, sizeof(cmd.text), data_str);
+            g_router.on_bot_reply(&cmd);
+        }
+    }
+    else if (strcmp(type, "tts_end") == 0) {
+        msg_type = WS_MSG_TTS_END;
+        if (g_router.on_tts_end) {
+            g_router.on_tts_end();
+        }
+    }
+    else if (strcmp(type, "error") == 0) {
+        msg_type = WS_MSG_ERROR_MSG;
+        if (g_router.on_error) {
+            ws_error_cmd_t cmd = {0};
+            cmd.code = get_int(root, "code", 1);
+            const char *data_str = get_string(root, "data");
+            copy_string(cmd.message, sizeof(cmd.message), data_str);
+            g_router.on_error(&cmd);
         }
     }
     else if (strcmp(type, "capture") == 0) {
         msg_type = WS_MSG_CAPTURE;
         if (g_router.on_capture) {
+            cJSON *data = cJSON_GetObjectItem(root, "data");
             ws_capture_cmd_t cmd = {
-                .quality = get_int(root, "quality", 80),
+                .quality = data ? get_int(data, "quality", 80) : 80,
             };
             g_router.on_capture(&cmd);
         }
@@ -139,7 +177,7 @@ ws_msg_type_t ws_route_message(const char *json_str)
             g_router.on_reboot();
         }
     }
-    /* Media stream types (Watcher -> Cloud) - recognized but no handler */
+    /* Media stream types - recognized but no handler */
     else if (strcmp(type, "audio") == 0) {
         msg_type = WS_MSG_AUDIO;
     }
@@ -158,9 +196,6 @@ ws_msg_type_t ws_route_message(const char *json_str)
     else if (strcmp(type, "pong") == 0) {
         msg_type = WS_MSG_PONG;
     }
-    else if (strcmp(type, "error") == 0) {
-        msg_type = WS_MSG_ERROR;
-    }
     else if (strcmp(type, "connected") == 0) {
         msg_type = WS_MSG_CONNECTED;
     }
@@ -170,7 +205,7 @@ ws_msg_type_t ws_route_message(const char *json_str)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse servo command                                        */
+/* Public: Parse servo command (v2.0 format)                          */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_servo(const char *json_str, ws_servo_cmd_t *out_cmd)
@@ -184,8 +219,15 @@ int ws_parse_servo(const char *json_str, ws_servo_cmd_t *out_cmd)
         return -1;
     }
 
-    out_cmd->x = get_int(root, "x", 90);
-    out_cmd->y = get_int(root, "y", 90);
+    /* v2.0 format: data.x, data.y */
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+    if (data && cJSON_IsObject(data)) {
+        out_cmd->x = get_int(data, "x", 90);
+        out_cmd->y = get_int(data, "y", 90);
+    } else {
+        out_cmd->x = 90;
+        out_cmd->y = 90;
+    }
 
     cJSON_Delete(root);
     return 0;
@@ -207,16 +249,20 @@ int ws_parse_display(const char *json_str, ws_display_cmd_t *out_cmd)
     }
 
     memset(out_cmd, 0, sizeof(*out_cmd));
-    copy_string(out_cmd->text, sizeof(out_cmd->text), get_string(root, "text"));
-    copy_string(out_cmd->emoji, sizeof(out_cmd->emoji), get_string(root, "emoji"));
-    out_cmd->size = get_int(root, "size", 0);
+
+    cJSON *data = cJSON_GetObjectItem(root, "data");
+    if (data && cJSON_IsObject(data)) {
+        copy_string(out_cmd->text, sizeof(out_cmd->text), get_string(data, "text"));
+        copy_string(out_cmd->emoji, sizeof(out_cmd->emoji), get_string(data, "emoji"));
+        out_cmd->size = get_int(data, "size", 0);
+    }
 
     cJSON_Delete(root);
     return 0;
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse status command                                       */
+/* Public: Parse status command (v2.0 format)                         */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_status(const char *json_str, ws_status_cmd_t *out_cmd)
@@ -231,8 +277,83 @@ int ws_parse_status(const char *json_str, ws_status_cmd_t *out_cmd)
     }
 
     memset(out_cmd, 0, sizeof(*out_cmd));
-    copy_string(out_cmd->state, sizeof(out_cmd->state), get_string(root, "state"));
-    copy_string(out_cmd->message, sizeof(out_cmd->message), get_string(root, "message"));
+
+    /* v2.0 format: data is string */
+    const char *data_str = get_string(root, "data");
+    copy_string(out_cmd->data, sizeof(out_cmd->data), data_str);
+
+    cJSON_Delete(root);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Parse ASR result (v2.0 format)                             */
+/* ------------------------------------------------------------------ */
+
+int ws_parse_asr_result(const char *json_str, ws_asr_result_cmd_t *out_cmd)
+{
+    if (!json_str || !out_cmd) {
+        return -1;
+    }
+
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        return -1;
+    }
+
+    memset(out_cmd, 0, sizeof(*out_cmd));
+
+    const char *data_str = get_string(root, "data");
+    copy_string(out_cmd->text, sizeof(out_cmd->text), data_str);
+
+    cJSON_Delete(root);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Parse bot reply (v2.0 format)                              */
+/* ------------------------------------------------------------------ */
+
+int ws_parse_bot_reply(const char *json_str, ws_bot_reply_cmd_t *out_cmd)
+{
+    if (!json_str || !out_cmd) {
+        return -1;
+    }
+
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        return -1;
+    }
+
+    memset(out_cmd, 0, sizeof(*out_cmd));
+
+    const char *data_str = get_string(root, "data");
+    copy_string(out_cmd->text, sizeof(out_cmd->text), data_str);
+
+    cJSON_Delete(root);
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Parse error message (v2.0 format)                          */
+/* ------------------------------------------------------------------ */
+
+int ws_parse_error(const char *json_str, ws_error_cmd_t *out_cmd)
+{
+    if (!json_str || !out_cmd) {
+        return -1;
+    }
+
+    cJSON *root = cJSON_Parse(json_str);
+    if (!root) {
+        return -1;
+    }
+
+    memset(out_cmd, 0, sizeof(*out_cmd));
+
+    out_cmd->code = get_int(root, "code", 1);
+    const char *data_str = get_string(root, "data");
+    copy_string(out_cmd->message, sizeof(out_cmd->message), data_str);
 
     cJSON_Delete(root);
     return 0;

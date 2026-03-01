@@ -1,8 +1,8 @@
-# MVP-W 通讯协议文档 v1.1
+# MVP-W 通讯协议文档 v2.0
 
-> 文档日期：2026-02-28
+> 文档日期：2026-03-01
 > 状态：已确认
-> 更新：音频格式从 Opus 改为 PCM（简化实现）
+> 更新：统一消息格式，简化二进制帧
 
 ## 1. 系统架构
 
@@ -27,242 +27,241 @@
 └─────────────────────┘
 ```
 
-## 2. WebSocket 消息协议
+## 2. 统一消息格式
 
-### 2.1 控制指令 (Cloud → Watcher)
+### 2.1 JSON 文本消息
 
-| type | 字段 | 说明 |
-|------|------|------|
-| **servo** | `x`, `y` | 舵机控制 (0-180°) |
-| **tts** | 二进制帧 | TTS 音频播放 (AUD1 协议，见 3.2) |
-| **display** | `text`, `emoji?`, `size?` | 屏幕显示更新 |
-| **status** | `state`, `message` | AI 状态反馈 |
-| **capture** | `quality` | 拍照请求 (MVP 暂不实现) |
-| **reboot** | - | 重启设备 |
-
-### 2.2 媒体流 (双向)
-
-| 方向 | type | 字段 | 说明 |
-|------|------|------|------|
-| Watcher → Cloud | **audio** | 二进制帧 | 录音上传 (AUD1 协议) |
-| Watcher → Cloud | **audio_end** | JSON | 录音结束标记 |
-| Cloud → Watcher | **tts** | 二进制帧 | TTS 播放 (AUD1 协议) |
-| Watcher → Cloud | **video** | - | 视频流 (MVP 暂不实现) |
-| Watcher → Cloud | **sensor** | - | 传感器数据 (MVP 暂不实现) |
-
-## 3. 详细消息格式
-
-### 3.1 舵机控制
+所有 JSON 文本消息采用统一格式：
 
 ```json
-// Cloud → Watcher
-{"type": "servo", "x": 90, "y": 90}
+{
+  "type": "消息类型",
+  "code": 0,
+  "data": "消息数据"
+}
 ```
 
-**字段说明**：
-- `x`: X 轴角度 (0-180)，控制左右
-- `y`: Y 轴角度 (0-180)，控制上下
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| type | string | 消息类型 |
+| code | int | 状态码，`0` 表示成功，`1` 表示错误 |
+| data | any | 消息数据，可以是 string、object 等 |
 
-**Watcher 内部处理流程**：
+### 2.2 二进制消息
+
+- **TTS 音频** (Cloud → Watcher)：原始 PCM，24kHz，16-bit，mono
+- **语音音频** (Watcher → Cloud)：原始 PCM，16kHz，16-bit，mono
+
+---
+
+## 3. 服务端 → 客户端消息
+
+### 3.1 ASR 识别结果 (asr_result)
+
+语音识别完成后的文本结果。
+
+```json
+{"type": "asr_result", "code": 0, "data": "识别到的文本内容"}
+```
+
+**Watcher 处理**：
+- 显示识别文本
+- 切换到 analyzing 动画
+
+---
+
+### 3.2 Bot 回复 (bot_reply)
+
+AI 对话返回的回复文本。
+
+```json
+{"type": "bot_reply", "code": 0, "data": "AI 回复内容"}
+```
+
+**Watcher 处理**：
+- 可选：显示回复文本
+- 准备接收 TTS 音频
+
+---
+
+### 3.3 状态消息 (status)
+
+系统状态变化通知。
+
+```json
+{"type": "status", "code": 0, "data": "状态描述信息"}
+```
+
+**示例场景**：
+- `[thinking] 正在思考...` - AI 思考中
+- `舵机动画开始: speech_nod` - 舵机动画状态
+
+**Watcher 处理**：
+- 解析状态内容
+- 更新屏幕显示和动画
+
+---
+
+### 3.4 错误消息 (error)
+
+系统错误或异常信息。
+
+```json
+{"type": "error", "code": 1, "data": "错误描述信息"}
+```
+
+**Watcher 处理**：
+- 显示错误状态
+- 切换到 sad 动画
+
+---
+
+### 3.5 舵机控制 (servo)
+
+实时舵机角度数据。
+
+```json
+{"type": "servo", "code": 0, "data": {"x": 90, "y": 45}}
+```
+
+| 字段 | 类型 | 范围 | 说明 |
+|------|------|------|------|
+| x | int | 0-180 | X 轴角度，控制左右 |
+| y | int | 0-180 | Y 轴角度，控制上下 |
+
+**Watcher 处理流程**：
 ```
 ws_router → on_servo_handler() → uart_bridge_send_servo(x, y)
                                      ↓
-                              UART: "X:90\r\nY:90\r\n"
+                              UART: "X:90\r\nY:45\r\n"
 ```
 
-### 3.2 TTS 播放 (Cloud → Watcher)
+---
 
-**二进制帧格式**（与音频上传一致）：
-```
-┌──────────┬────────────┬─────────────────┐
-│  魔数    │   数据长度  │   PCM 数据      │
-│  4 字节  │   4 字节   │    N 字节       │
-└──────────┴────────────┴─────────────────┘
+### 3.6 TTS 音频结束 (tts_end)
 
-魔数: "AUD1" (0x41 0x55 0x44 0x31)
-长度: uint32_t little-endian
-音频: 16-bit signed PCM, 16kHz, mono
-```
-
-**Watcher 内部处理流程**：
-```
-WebSocket 二进制消息 → 检查魔数 AUD1 → 解析长度 → I2S 播放
-```
-
-**说明**：
-- TTS 音频与上传音频使用相同的二进制帧格式
-- **音频格式**：16-bit signed PCM, 16kHz 采样率, 单声道
-- 带宽：约 256 kbps（相比 Opus 24kbps 更高，但无需编解码）
-
-### 3.3 屏幕显示
+TTS 语音合成完成，所有音频数据已发送完毕。
 
 ```json
-// Cloud → Watcher
-{
-    "type": "display",
-    "text": "你好，我是小微",
-    "emoji": "happy",
-    "size": 24
-}
+{"type": "tts_end", "code": 0, "data": "ok"}
 ```
 
-**字段说明**：
-- `text`: 显示文本 (必填)
-- `emoji`: 表情类型 (可选，默认 `normal`)
-- `size`: 字体大小 (可选，默认 24)
+**Watcher 处理**：
+- 等待 I2S 缓冲区播放完毕 (~500ms)
+- 停止音频播放
+- 切换到 happy 动画
 
-**Watcher 内部处理流程**：
+---
+
+### 3.7 TTS 音频数据 (二进制)
+
+TTS 合成的音频数据，直接发送二进制内容。
+
+- **消息类型**：二进制（非 JSON）
+- **数据格式**：原始 PCM（无帧头）
+- **采样率**：24000 Hz
+- **位深**：16-bit signed
+- **声道**：mono
+
+**Watcher 处理**：
 ```
-ws_router → on_display_handler() → display_update(text, emoji, size, NULL)
+WebSocket 二进制消息 → 直接写入 I2S 播放
 ```
 
-### 3.4 状态反馈
+---
+
+## 4. 客户端 → 服务端消息
+
+### 4.1 语音音频数据 (二进制)
+
+客户端发送的 PCM 音频流数据。
+
+- **消息类型**：二进制
+- **数据格式**：原始 PCM（无帧头）
+- **采样率**：16000 Hz
+- **位深**：16-bit signed
+- **声道**：mono
+
+---
+
+### 4.2 结束标记 (over)
+
+客户端发送结束标记，表示音频数据已发送完毕。
+
+```
+over
+```
+
+> **注意**：这是纯文本字符串，不是 JSON 格式。
+
+---
+
+### 4.3 舵机动画控制 (servo)
+
+控制舵机动画的播放。
 
 ```json
-// Cloud → Watcher
-{
-    "type": "status",
-    "state": "thinking",
-    "message": "正在思考..."
-}
+// 开始播放动画
+{"type": "servo", "action": "start", "state": "speech_nod"}
+
+// 停止动画
+{"type": "servo", "action": "stop"}
 ```
 
-**字段说明**：
-- `state`: 状态类型
-  - `thinking`: AI 思考中
-  - `speaking`: AI 正在回复
-  - `idle`: 空闲状态
-  - `error`: 错误状态
-- `message`: 状态描述文本
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| action | string | 操作类型：`start` 播放动画，`stop` 停止动画 |
+| state | string | 动画状态名（仅 start 时需要） |
 
-**Watcher 内部处理流程**：
-```
-ws_router → on_status_handler() → display_update(message, emoji_from_state, 0, NULL)
+**可用动画状态**：
+- `speech_nod` - 说话点头动画
 
-emoji 映射:
-  thinking  → analyzing
-  speaking  → speaking
-  idle      → standby
-  error     → sad
-```
+---
 
-### 3.5 重启设备
+## 5. 消息流程示例
 
-```json
-// Cloud → Watcher
-{"type": "reboot"}
-```
-
-**Watcher 内部处理流程**：
-```
-ws_router → on_reboot_handler() → esp_restart()
-```
-
-### 3.6 拍照请求 (MVP 暂不实现)
-
-```json
-// Cloud → Watcher
-{"type": "capture", "quality": 80}
-```
-
-### 3.7 音频二进制帧格式（双向通用）
-
-**用于**：
-- Watcher → Cloud：录音上传
-- Cloud → Watcher：TTS 播放
-
-**帧结构**：
-```
-┌──────────┬────────────┬─────────────────┐
-│  魔数    │   数据长度  │   PCM 数据      │
-│  4 字节  │   4 字节   │    N 字节       │
-└──────────┴────────────┴─────────────────┘
-
-魔数: "AUD1" (0x41 0x55 0x44 0x31)
-长度: uint32_t little-endian
-音频: 16-bit signed PCM, 16kHz, mono
-```
-
-**音频参数**：
-- 采样率：16000 Hz
-- 位深：16-bit signed
-- 声道：mono (单声道)
-- 帧大小：60ms = 960 samples = 1920 bytes
-- 带宽：~256 kbps
-
-**Cloud 端解析示例 (Python)**：
-```python
-def parse_audio_frame(data: bytes) -> bytes:
-    if len(data) < 8:
-        raise ValueError("Frame too short")
-
-    magic = data[:4]
-    if magic != b'AUD1':
-        raise ValueError(f"Invalid magic: {magic}")
-
-    length = struct.unpack('<I', data[4:8])[0]
-    pcm_data = data[8:8+length]
-
-    return pcm_data  # 16-bit PCM, 16kHz, mono
-```
-
-**Watcher 端解析示例 (C)**：
-```c
-int parse_audio_frame(const uint8_t *data, int len, uint32_t *out_len) {
-    if (len < 8) return -1;
-
-    if (memcmp(data, "AUD1", 4) != 0) {
-        return -1;  // Invalid magic
-    }
-
-    memcpy(out_len, data + 4, 4);  // Little-endian
-    return 8;  // Return header size, data starts at offset 8
-}
-```
-
-**构建音频帧 (Python)**：
-```python
-def build_audio_frame(pcm_data: bytes) -> bytes:
-    """Build AUD1 frame from PCM data"""
-    header = b'AUD1' + struct.pack('<I', len(pcm_data))
-    return header + pcm_data
-```
-
-### 3.8 录音结束
-
-```json
-// Watcher → Cloud
-{"type": "audio_end"}
-```
-
-## 4. 表情/动画映射
-
-| emoji 值 | 动画类型 | 使用场景 |
-|----------|---------|---------|
-| `happy` | GREETING | 欢迎状态、正常待机 |
-| `sad` | DETECTED | 错误、遗憾 |
-| `surprised` | DETECTING | 检测到异常 |
-| `angry` | ANALYZING | 警告状态 |
-| `normal` | STANDBY | 默认状态 |
-| `listening` | LISTENING | 录音中 |
-| `analyzing` / `thinking` | ANALYZING | AI 处理中 |
-| `speaking` | SPEAKING | TTS 播放中 |
-| `standby` | STANDBY | 离线/空闲 |
-
-## 5. 状态流转图
+### 5.1 完整语音对话流程
 
 ```
-┌─────────┐  按下按钮   ┌───────────┐  松开按钮   ┌──────────┐
-│ STANDBY │ ─────────► │ LISTENING │ ─────────► │  HAPPY   │
-└────┬────┘            └───────────┘            └────┬─────┘
-     │                                                   │
-     │ WS断开                          WS收到status消息   │
-     ▼                                                   ▼
-┌──────────┐                                    ┌────────────┐
-│ STANDBY  │                                    │ ANALYZING  │
-│(屏幕提示)│                                    │ /SPEAKING  │
-└──────────┘                                    └────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│ 客户端 (Watcher)                  服务端 (Cloud)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ─── 二进制音频数据 ─────────────────────────────────────────►  │
+│  ─── "over" ─────────────────────────────────────────────────►  │
+│                                                                 │
+│  ◄── {"type":"asr_result","code":0,"data":"今天天气"} ───────   │
+│  ◄── {"type":"bot_reply","code":0,"data":"今天天气晴朗..."} ─   │
+│                                                                 │
+│  ◄── 二进制 TTS 音频 (PCM 24kHz) ────────────────────────────   │
+│  ◄── {"type":"servo","code":0,"data":{"x":95,"y":90}} ───────   │
+│  ◄── {"type":"servo","code":0,"data":{"x":100,"y":90}} ──────   │
+│  ...                                                            │
+│  ◄── {"type":"tts_end","code":0,"data":"ok"} ────────────────   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+### 5.2 舵机动画控制流程
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 客户端 (Watcher)                  服务端 (Cloud)                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ─── {"type":"servo","action":"start","state":"speech_nod"} ─►  │
+│  ◄── {"type":"status","code":0,"data":"舵机动画开始: speech_nod"}│
+│  ◄── {"type":"servo","code":0,"data":{"x":95,"y":90}} ───────   │
+│  ◄── {"type":"servo","code":0,"data":{"x":96,"y":90}} ───────   │
+│  ...                                                            │
+│                                                                 │
+│  ─── {"type":"servo","action":"stop"} ───────────────────────►  │
+│  ◄── {"type":"status","code":0,"data":"舵机动画已停止"} ──────   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
 
 ## 6. UART 协议 (Watcher → MCU)
 
@@ -279,22 +278,60 @@ Y:90\r\n
 - `angle`: 角度值 (0-180)
 - 每条指令以 `\r\n` 结尾
 
-## 7. 待确认事项
+---
 
-- [ ] 拍照功能：MVP 是否需要？
-- [ ] 传感器数据：MVP 是否需要？
-- [ ] 错误处理：是否需要 `{"type": "error", "code": ..., "message": ...}` 消息？
-- [x] ~~TTS 音频格式~~ → 已确定使用二进制帧格式（与上传一致）
-- [x] ~~音频编解码~~ → MVP 使用 PCM 直传（无压缩），后续可升级 Opus
+## 7. 表情/动画映射
+
+| emoji 值 | 动画类型 | 使用场景 |
+|----------|---------|---------|
+| `happy` | GREETING | 欢迎状态、正常待机 |
+| `sad` / `error` | DETECTED | 错误、遗憾 |
+| `surprised` | DETECTING | 检测到异常 |
+| `angry` | ANALYZING | 警告状态 |
+| `standby` / `normal` / `idle` | STANDBY | 默认状态 |
+| `listening` | LISTENING | 录音中 |
+| `analyzing` / `thinking` | ANALYZING | AI 处理中 |
+| `speaking` | LISTENING (temp) | TTS 播放中 |
 
 ---
 
-*文档版本：1.1*
-*更新日期：2026-02-28*
+## 8. 音频参数汇总
+
+| 方向 | 用途 | 采样率 | 格式 | 帧格式 |
+|------|------|--------|------|--------|
+| Watcher → Cloud | 语音上传 | 16kHz | 16-bit PCM mono | 原始 PCM |
+| Cloud → Watcher | TTS 播放 | 24kHz | 16-bit PCM mono | 原始 PCM |
+
+**带宽计算**：
+- 上传：16000 × 2 × 1 = 32 KB/s = 256 kbps
+- 下载：24000 × 2 × 1 = 48 KB/s = 384 kbps
+
+---
+
+## 9. 状态流转图
+
+```
+┌─────────┐  按下按钮   ┌───────────┐  松开按钮   ┌──────────┐
+│ STANDBY │ ─────────► │ LISTENING │ ─────────► │ANALYZING │
+└────┬────┘            └───────────┘            └────┬─────┘
+     │                                                │
+     │ WS断开                      收到 tts_end      │
+     ▼                                                ▼
+┌──────────┐                                   ┌────────────┐
+│ STANDBY  │                                   │  HAPPY     │
+│(屏幕提示)│                                   │ (播放完成) │
+└──────────┘                                   └────────────┘
+```
+
+---
+
+*文档版本：2.0*
+*更新日期：2026-03-01*
 
 ## 变更历史
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
+| 2.0 | 2026-03-01 | **协议重构** - 统一消息格式，简化二进制帧（去除 AUD1 头），新增 asr_result/bot_reply/tts_end 消息类型 |
 | 1.1 | 2026-02-28 | 音频格式从 Opus 改为 PCM 直传 |
 | 1.0 | 2026-02-28 | 初始版本 |

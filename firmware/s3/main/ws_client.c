@@ -1,3 +1,8 @@
+/**
+ * @file ws_client.c
+ * @brief WebSocket client implementation (Protocol v2.0)
+ */
+
 #include "ws_client.h"
 #include "ws_router.h"
 #include "display_ui.h"
@@ -15,12 +20,14 @@
 /* WebSocket configuration (MVP: hardcoded) */
 #define WS_SERVER_URL  "ws://192.168.31.10:8766"
 #define WS_TIMEOUT_MS  10000
-#define TTS_TIMEOUT_MS 2000  /* TTS stream timeout - no data for 2s means complete */
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
 static bool tts_playing = false;  /* TTS playback state */
-static int64_t tts_last_data_time = 0;  /* Last TTS data timestamp */
+
+/* ------------------------------------------------------------------ */
+/* WebSocket Event Handler                                            */
+/* ------------------------------------------------------------------ */
 
 static void ws_event_handler(void *handler_args, esp_event_base_t base,
                              int32_t event_id, void *event_data)
@@ -47,36 +54,29 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                 /* Handle server text messages */
                 char *msg = strndup((char *)data->data_ptr, data->data_len);
                 if (msg) {
-                    /* End TTS playback when receiving any text message */
+                    ESP_LOGI(TAG, "Received text: %s", msg);
+
+                    /* End TTS playback when receiving tts_end or non-TTS message */
                     if (tts_playing) {
-                        ws_tts_complete();
+                        /* Check if this is tts_end message */
+                        if (strstr(msg, "\"tts_end\"") != NULL) {
+                            /* tts_end will be handled by router */
+                        } else if (strstr(msg, "\"type\"") == NULL) {
+                            /* Not a JSON message, end TTS */
+                            ws_tts_complete();
+                        }
                     }
 
-                    /* Check for server protocol formats first */
-                    if (strncmp(msg, "result:", 7) == 0) {
-                        /* ASR result: "result: {text}" */
-                        ESP_LOGI(TAG, "ASR result: %s", msg + 7);
-                        display_update(msg + 7, "analyzing", 0, NULL);
-                    }
-                    else if (strcmp(msg, "tts:start") == 0) {
-                        /* TTS start marker - prepare to receive audio */
-                        ESP_LOGI(TAG, "TTS start, preparing audio playback");
-                        /* Don't start audio here - will start on first binary chunk */
-                    }
-                    else if (strncmp(msg, "error:", 6) == 0) {
-                        /* Error message */
-                        ESP_LOGE(TAG, "Server error: %s", msg + 6);
-                        display_update("Error", "sad", 0, NULL);
-                    }
-                    else {
-                        /* Try JSON routing for other messages */
+                    /* Route JSON messages */
+                    if (msg[0] == '{') {
                         ws_route_message(msg);
                     }
+
                     free(msg);
                 }
             }
             else if (data->op_code == WS_TRANSPORT_OPCODES_BINARY) {
-                /* Handle binary message (TTS audio) */
+                /* Handle binary message (TTS audio - raw PCM) */
                 ws_handle_tts_binary((const uint8_t *)data->data_ptr, data->data_len);
             }
             break;
@@ -89,6 +89,10 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
             break;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Public: Initialize WebSocket Client                                */
+/* ------------------------------------------------------------------ */
 
 int ws_client_init(void)
 {
@@ -110,6 +114,10 @@ int ws_client_init(void)
     ESP_LOGI(TAG, "WebSocket client initialized (URL: %s)", WS_SERVER_URL);
     return 0;
 }
+
+/* ------------------------------------------------------------------ */
+/* Public: Start/Stop Connection                                      */
+/* ------------------------------------------------------------------ */
 
 int ws_client_start(void)
 {
@@ -136,6 +144,10 @@ void ws_client_stop(void)
         is_connected = false;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Public: Send Functions                                             */
+/* ------------------------------------------------------------------ */
 
 int ws_client_send_binary(const uint8_t *data, int len)
 {
@@ -167,7 +179,7 @@ int ws_client_is_connected(void)
 /* ------------------------------------------------------------------ */
 
 /**
- * Audio protocol (v1.1):
+ * Audio protocol (v2.0):
  *
  * Raw PCM binary frame (no header):
  *   [0-n]   PCM audio data (16-bit, 16kHz, mono)
@@ -182,7 +194,7 @@ int ws_send_audio(const uint8_t *data, int len)
         return -1;
     }
 
-    /* Send raw PCM directly, no AUD1 header */
+    /* Send raw PCM directly, no header */
     /* Increased timeout to 5 seconds for better reliability */
     int sent = esp_websocket_client_send_bin(ws_client, (const char *)data, len, pdMS_TO_TICKS(5000));
 
@@ -196,19 +208,19 @@ int ws_send_audio(const uint8_t *data, int len)
 
 int ws_send_audio_end(void)
 {
-    /* Send audio end marker (适配 watcher-server 协议) */
+    /* Send audio end marker (v2.0 protocol: "over") */
     return ws_client_send_text("over");
 }
 
 /* ------------------------------------------------------------------ */
-/* TTS Binary Frame Handling                                          */
+/* TTS Binary Frame Handling (v2.0 - Raw PCM)                         */
 /* ------------------------------------------------------------------ */
 
 /**
  * Play TTS audio from binary frame (Raw PCM)
  *
- * Frame format (v1.1):
- *   [0-n]   PCM audio data (16-bit, 16kHz, mono)
+ * Frame format (v2.0):
+ *   [0-n]   PCM audio data (16-bit, 24kHz, mono)
  *
  * @param data Binary frame data
  * @param len Frame length
@@ -230,25 +242,23 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
         tts_playing = true;
     }
 
-    /* Update last data timestamp for timeout detection */
-    tts_last_data_time = esp_timer_get_time();
-
-    /* Play raw PCM directly */
-    ESP_LOGI(TAG, "Calling hal_audio_write(%d bytes)...", len);
+    /* Play raw PCM directly (no AUD1 header in v2.0) */
+    ESP_LOGD(TAG, "Playing PCM: %d bytes", len);
     int written = hal_audio_write(data, len);
-    ESP_LOGI(TAG, "hal_audio_write returned: %d", written);
     if (written != len) {
         ESP_LOGW(TAG, "TTS playback incomplete: %d/%d", written, len);
     }
 }
 
 /**
- * Signal TTS playback complete (called by application)
+ * Signal TTS playback complete (called by application or tts_end handler)
  * Waits for I2S DMA buffer to finish playing before switching state
  */
 void ws_tts_complete(void)
 {
     if (tts_playing) {
+        ESP_LOGI(TAG, "TTS playback complete");
+
         /* Wait for I2S DMA buffer to finish playing (~500ms buffer) */
         vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -257,7 +267,6 @@ void ws_tts_complete(void)
         hal_audio_set_sample_rate(16000);
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
-        ESP_LOGI(TAG, "TTS playback complete");
     }
 }
 
@@ -265,19 +274,14 @@ void ws_tts_complete(void)
  * @brief Check TTS timeout and auto-complete if needed
  *
  * Call this periodically from main loop. If no TTS data received
- * for TTS_TIMEOUT_MS, auto-complete the playback.
+ * for a while, auto-complete the playback.
+ * Note: In v2.0 protocol, server should send tts_end message.
+ * This is kept as a fallback.
  */
 void ws_tts_timeout_check(void)
 {
-    if (!tts_playing || tts_last_data_time == 0) {
-        return;
-    }
-
-    int64_t now = esp_timer_get_time();
-    int64_t elapsed_ms = (now - tts_last_data_time) / 1000;
-
-    if (elapsed_ms > TTS_TIMEOUT_MS) {
-        ESP_LOGI(TAG, "TTS timeout (%lld ms), auto-completing", elapsed_ms);
-        ws_tts_complete();
-    }
+    /* In v2.0, tts_end message should be received from server.
+     * This function is kept for backward compatibility but does nothing.
+     * TTS completion is now triggered by on_tts_end_handler(). */
+    (void)tts_playing;  /* Suppress unused warning */
 }
