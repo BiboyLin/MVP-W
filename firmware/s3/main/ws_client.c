@@ -92,7 +92,8 @@ int ws_client_init(void)
     esp_websocket_client_config_t cfg = {
         .uri = WS_SERVER_URL,
         .network_timeout_ms = WS_TIMEOUT_MS,
-        .buffer_size = 4096,
+        .buffer_size = 8192,  /* Increased for audio streaming */
+        .task_stack = 8192,   /* Increased stack size */
     };
 
     ws_client = esp_websocket_client_init(&cfg);

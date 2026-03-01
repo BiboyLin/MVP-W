@@ -174,8 +174,11 @@ int voice_recorder_tick(void)
 
     /* Send PCM directly via WebSocket (no encoding) */
     if (ws_send_audio(g_pcm_buf, pcm_len) != 0) {
-        ESP_LOGE(TAG, "WS send audio failed");
         g_stats.error_count++;
+        /* Only log every 10 errors to avoid flooding */
+        if (g_stats.error_count % 10 == 1) {
+            ESP_LOGE(TAG, "WS send audio failed (count: %d)", g_stats.error_count);
+        }
         return -1;
     }
 
