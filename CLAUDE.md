@@ -601,7 +601,7 @@ python main.py --host 0.0.0.0 --port 8766
 | 表情动画 | `firmware/s3/main/emoji_anim.c` | PNG 动画定时器 |
 | 表情加载 | `firmware/s3/main/emoji_png.c` | SPIFFS PNG 加载 |
 | 音频 HAL | `firmware/s3/main/hal_audio.c` | I2S 音频抽象层 |
-| PCM HAL | `firmware/s3/main/hal_opus.c` | PCM passthrough (无压缩) |
+| Opus HAL | `firmware/s3/main/hal_opus.c` | Opus 编解码 (待实现) |
 | UART 转发 | `firmware/s3/main/uart_bridge.c` | UART 转发到 MCU |
 | 构建配置 | `firmware/s3/sdkconfig.defaults` | **关键！需与 factory_firmware 同步** |
 | 通信协议 | `docs/COMMUNICATION_PROTOCOL.md` | 协议详细文档 |
@@ -697,19 +697,15 @@ ctest --test-dir build -V
 
 ### Task 3.3: Watcher 网络层实现 ✅
 
-## Phase 4: 联调与集成 (双板 + 云端) ✅ 完成
+## Phase 4: 联调与集成 (双板 + 云端) 🔄 进行中
 
-### Task 4.1: S3 与 MCU 的 UART 通信闭环 ✅
+### Task 4.1: S3 与 MCU 的 UART 通信闭环
 
-物理连接 GPIO 19/20，验证 Watcher 能否顺畅下发 `X:90\r\nY:90\r\n`。
+物理连接 GPIO 19/20，验证 Watcher 能否顺畅下发 `X:90\r\nY:45\r\n`。
 
-**完成状态 (2026-03-01)**：双板通信正常，舵机控制验证通过。
-
-### Task 4.2: 整体端云联调 ✅
+### Task 4.2: 整体端云联调
 
 跑通"按键说话 → ASR → LLM 思考 (屏幕反馈) → 舵机动作 + TTS 播报"的完整 MVP 链路。
-
-**完成状态 (2026-03-01)**：完整语音交互流程验证通过。
 
 ---
 
@@ -717,13 +713,12 @@ ctest --test-dir build -V
 
 | 任务 | 优先级 | 状态 | 说明 |
 |------|--------|------|------|
-| ~~端到端语音交互测试~~ | ✅ | **已完成** | 完整流程：按键 → ASR → LLM → TTS |
-| ~~服务器端 TTS 协议对齐~~ | ✅ | **已完成** | 服务器使用 AUD1 二进制帧格式（PCM） |
-| ~~S3 ↔ MCU UART 闭环~~ | ✅ | **已完成** | 双板通信验证通过 |
+| **Opus 编解码器 HAL** | 🔴 高 | 待实现 | `hal_opus.c` 当前为空壳，需集成真正的 Opus 库 |
+| **服务器端 TTS 协议对齐** | 🔴 高 | 待协调 | 服务器需使用 AUD1 二进制帧格式发送 TTS |
+| **端到端语音交互测试** | 🔴 高 | 待测试 | 完整流程：按键 → ASR → LLM → TTS |
+| **S3 ↔ MCU UART 闭环** | 🟡 中 | 待测试 | 双板通信验证 |
 | **摄像头集成** | 🟢 低 | 可选 | Himax 拍照 + JPEG + WebSocket 发送 |
 | **传感器数据上报** | 🟢 低 | 可选 | CO2/温湿度数据上报 |
-| **唤醒词检测** | 🟢 低 | 可选 | ESP-SR 离线唤醒 "小微小微" |
-| **音频优化** | 🟢 低 | 可选 | 升级为 Opus 编解码（降低带宽） |
 
 ---
 
@@ -789,14 +784,13 @@ void handle_crash() {
 
 ---
 
-*文档版本：2.3*
-*更新日期：2026-03-01*
+*文档版本：2.2*
+*更新日期：2026-02-28*
 
 ## 变更历史
 
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
-| 2.3 | 2026-03-01 | **MVP 完成！** Phase 4 联调通过，三个高优先级任务已完成 |
 | 2.2 | 2026-02-28 | 更新通信协议为 AUD1 二进制帧格式；添加待开发功能清单 |
 | 2.1 | 2026-02-27 | 添加 PNG 动画花屏修复记录 |
 | 2.0 | 2026-02-26 | 重构文档结构，添加 TDD 任务切片 |
