@@ -584,6 +584,22 @@ esp_err_t lvgl_port_encoder_btn_register_event_cb(lv_indev_t *encoder, button_ev
     return iot_button_register_cb(encoder_ctx->btn_handle, event, cb, user_data);
 }
 
+esp_err_t lvgl_port_encoder_btn_register_event_data_cb(lv_indev_t *encoder, button_event_config_t event_cfg, button_cb_t cb, void *user_data)
+{
+    assert(encoder);
+    assert(cb);
+    lv_indev_drv_t *indev_drv = encoder->driver;
+    assert(indev_drv);
+    lvgl_port_encoder_ctx_t *encoder_ctx = (lvgl_port_encoder_ctx_t *)indev_drv->user_data;
+    assert(encoder_ctx);
+    if (event_cfg.event == BUTTON_PRESS_DOWN || event_cfg.event == BUTTON_PRESS_UP)
+    {
+        ESP_LOGW(TAG, "Button Press down or up event is reserved for lvgl");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    return iot_button_register_event_cb(encoder_ctx->btn_handle, event_cfg, cb, user_data);
+}
+
 #endif
 
 #ifdef ESP_LVGL_PORT_BUTTON_COMPONENT

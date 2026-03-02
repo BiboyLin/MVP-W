@@ -5,6 +5,8 @@
 #include "esp_check.h"
 
 #include "sensecap-watcher.h"
+#include "iot_button.h"
+#include "esp_lvgl_port.h"
 
 static const char *TAG = "BSP";
 
@@ -92,6 +94,41 @@ void bsp_set_btn_long_release_cb(void (*cb)(void))
     }
 
     lvgl_port_encoder_btn_register_event_cb(tp, BUTTON_LONG_PRESS_UP, bsp_btn_cb, cb);
+}
+
+void bsp_set_btn_multi_click_cb(int click_count, void (*cb)(void))
+{
+    lv_indev_t *tp = NULL;
+    while (1)
+    {
+        tp = lv_indev_get_next(tp);
+        if (tp == NULL || tp->driver->type == LV_INDEV_TYPE_ENCODER)
+        {
+            break;
+        }
+    }
+
+    if (tp == NULL)
+    {
+        ESP_LOGE(TAG, "No encoder found");
+        return;
+    }
+
+    /* Configure multiple click event with specified click count */
+    button_event_config_t event_cfg = {
+        .event = BUTTON_MULTIPLE_CLICK,
+        .event_data.multiple_clicks.clicks = click_count,
+    };
+
+    esp_err_t ret = lvgl_port_encoder_btn_register_event_data_cb(tp, event_cfg, bsp_btn_cb, cb);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Failed to register multi-click callback: %s", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Registered %d-click callback", click_count);
+    }
 }
 
 esp_err_t bsp_i2c_detect(i2c_port_t i2c_num)

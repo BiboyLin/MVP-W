@@ -21,6 +21,9 @@
 /* Hardware test mode (set to 1 for self-test) */
 #define ENABLE_HW_SELFTEST  1
 
+/* Physical restart: click count to trigger reboot */
+#define RESTART_CLICK_COUNT  5
+
 /* ------------------------------------------------------------------ */
 /* Button Callbacks (using SDK's bsp_set_btn_* interface)            */
 /* ------------------------------------------------------------------ */
@@ -37,6 +40,14 @@ static void on_button_long_release(void)
     ESP_LOGI(TAG, "Button LONG RELEASE - stop recording");
     voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
     display_update("Processing...", "analyzing", 0, NULL);
+}
+
+static void on_button_multi_click_restart(void)
+{
+    ESP_LOGW(TAG, "Button %d-click detected - REBOOTING!", RESTART_CLICK_COUNT);
+    display_update("Rebooting...", "sad", 0, NULL);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_restart();
 }
 
 /* ------------------------------------------------------------------ */
@@ -157,6 +168,8 @@ void app_main(void)
     /* 3.5 Register button callbacks (SDK already initialized IO expander) */
     bsp_set_btn_long_press_cb(on_button_long_press);
     bsp_set_btn_long_release_cb(on_button_long_release);
+    /* 3.6 Register multi-click restart callback (5 clicks to reboot) */
+    bsp_set_btn_multi_click_cb(RESTART_CLICK_COUNT, on_button_multi_click_restart);
     ESP_LOGI(TAG, "Button callbacks registered via SDK");
 
     /* 4. Initialize and connect to WiFi */

@@ -245,6 +245,19 @@ esp_err_t lvgl_port_encoder_register_event_cb(lv_indev_t *encoder, knob_event_t 
 esp_err_t lvgl_port_encoder_btn_register_event_cb(lv_indev_t *encoder, button_event_t event, button_cb_t cb, void *user_data);
 
 /**
+ * @brief Register event callback with event data for encoder button
+ *        Use this for BUTTON_MULTIPLE_CLICK with specific click count
+ *
+ * @param encoder Encoder input device
+ * @param event_cfg Event configuration (includes event type and data like click count)
+ * @param cb Callback function
+ * @param user_data User data passed to callback
+ * @return
+ *      - ESP_OK                    on success
+ */
+esp_err_t lvgl_port_encoder_btn_register_event_data_cb(lv_indev_t *encoder, button_event_config_t event_cfg, button_cb_t cb, void *user_data);
+
+/**
  * @brief Remove encoder from input devices
  *
  * @note Free all memory used for this input device.

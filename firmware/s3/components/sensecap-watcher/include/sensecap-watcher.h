@@ -303,6 +303,13 @@ esp_err_t bsp_knob_btn_deinit(void *param);
 void bsp_set_btn_long_press_cb(void (*cb)(void));
 void bsp_set_btn_long_release_cb(void (*cb)(void));
 
+/**
+ * @brief Set button multiple click callback
+ * @param click_count Number of clicks to trigger callback (e.g., 5 for 5-click restart)
+ * @param cb Callback function
+ */
+void bsp_set_btn_multi_click_cb(int click_count, void (*cb)(void));
+
 esp_err_t bsp_lcd_brightness_set(int brightness_percent);
 esp_lcd_panel_handle_t bsp_lcd_get_panel_handle(void);
 esp_lcd_touch_handle_t bsp_lcd_get_touch_handle(void);
