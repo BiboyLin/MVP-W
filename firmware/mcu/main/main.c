@@ -19,8 +19,10 @@ void app_main(void)
     /* 2. Startup: 3 blinks = boot OK */
     led_blink(3, 200);
 
-    /* 3. Move servos to default position (X:90, Y:120) */
-    servo_smooth_move(90, 120, 500);
+    /* 3. Set default position (X:90, Y:120) - will smooth automatically */
+    servo_set_angle(SERVO_X, 90);
+    servo_set_angle(SERVO_Y, 120);
+    vTaskDelay(pdMS_TO_TICKS(800));  /* Wait for smooth move to complete */
 
     /* 4. Solid LED = ready */
     led_set(true);

@@ -73,7 +73,8 @@ void on_servo_handler(const ws_servo_cmd_t *cmd)
         return;
     }
 
-    ESP_LOGI(TAG, "Servo command: x=%d, y=%d", cmd->x, cmd->y);
+    /* Use ESP_LOGD to avoid flooding logs with high-frequency servo commands */
+    ESP_LOGD(TAG, "Servo command: x=%d, y=%d", cmd->x, cmd->y);
 
     /* Forward to MCU via UART */
     uart_bridge_send_servo(cmd->x, cmd->y);

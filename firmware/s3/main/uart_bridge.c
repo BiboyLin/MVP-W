@@ -1,7 +1,10 @@
 #include "uart_bridge.h"
 #include "hal_uart.h"
+#include "esp_log.h"
 #include <stdio.h>
 #include <string.h>
+
+#define TAG "UART_BRIDGE"
 
 /* ------------------------------------------------------------------ */
 /* Private: Statistics                                                */
@@ -19,8 +22,11 @@ void uart_bridge_init(void)
 
     /* Initialize HAL UART */
     if (hal_uart_init() != 0) {
-        /* Log error but continue - may be tested separately */
+        ESP_LOGE(TAG, "HAL UART init failed");
+        /* Continue anyway - may be tested separately */
     }
+
+    ESP_LOGI(TAG, "UART bridge initialized");
 }
 
 /* ------------------------------------------------------------------ */
@@ -45,7 +51,7 @@ void uart_bridge_get_stats(uart_bridge_t *out_stats)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Send servo command                                         */
+/* Public: Send servo command (synchronous - fast enough for small data) */
 /* ------------------------------------------------------------------ */
 
 int uart_bridge_send_servo(int x, int y)
@@ -56,7 +62,7 @@ int uart_bridge_send_servo(int x, int y)
     if (y < 0) y = 0;
     if (y > 180) y = 180;
 
-    /* Format: "X:<x>\r\nY:<y>\r\n" */
+    /* Format: "X:<x>\r\nY:<y>\r\n" - only 16-20 bytes, very fast */
     char buf[32];
     int len = snprintf(buf, sizeof(buf), "X:%d\r\nY:%d\r\n", x, y);
 
@@ -65,7 +71,7 @@ int uart_bridge_send_servo(int x, int y)
         return -1;
     }
 
-    /* Send via HAL */
+    /* Send via HAL - synchronous but fast (~1ms for 20 bytes at 115200) */
     int sent = hal_uart_send((uint8_t *)buf, len);
     if (sent != len) {
         g_stats.error_count++;

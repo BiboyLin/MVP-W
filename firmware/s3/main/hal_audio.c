@@ -53,8 +53,9 @@ int hal_audio_init(void)
     current_sample_rate = SAMPLE_RATE_RECORD;
 
     /* Set volume and unmute (required for speaker output) */
+    /* NOTE: Volume 100 can cause clipping distortion, use 80 for cleaner output */
     bsp_codec_mute_set(false);
-    bsp_codec_volume_set(100, NULL);
+    bsp_codec_volume_set(80, NULL);
 
     ESP_LOGI(TAG, "Audio codec initialized (16kHz for recording, volume=100)");
     return 0;
@@ -72,8 +73,18 @@ void hal_audio_set_sample_rate(uint32_t sample_rate)
     }
 
     ESP_LOGI(TAG, "Switching sample rate: %lu -> %lu", current_sample_rate, sample_rate);
+
+    /* Stop codec first to flush DMA buffers and avoid glitch noise */
+    bsp_codec_dev_stop();
+
+    /* Small delay to ensure DMA is fully flushed */
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    /* Set new sample rate */
     bsp_codec_set_fs(sample_rate, 16, 1);
     current_sample_rate = sample_rate;
+
+    ESP_LOGI(TAG, "Sample rate switch complete");
 }
 
 int hal_audio_start(void)
@@ -88,6 +99,9 @@ int hal_audio_start(void)
             return -1;
         }
     }
+
+    /* Resume codec if it was stopped (e.g., by sample rate switch) */
+    bsp_codec_dev_resume();
 
     is_running = true;
     ESP_LOGI(TAG, "Audio started");
@@ -119,9 +133,10 @@ int hal_audio_write(const uint8_t *data, int len)
     }
 
     size_t bytes_written = 0;
-    ESP_LOGI(TAG, "Writing %d bytes to speaker...", len);
+    /* Use ESP_LOGD for high-frequency audio writes to avoid UART bottleneck */
+    ESP_LOGD(TAG, "Writing %d bytes to speaker...", len);
     esp_err_t ret = bsp_i2s_write((void *)data, len, &bytes_written, 100);
-    ESP_LOGI(TAG, "Write result: ret=%d, written=%d", ret, (int)bytes_written);
+    ESP_LOGD(TAG, "Write result: ret=%d, written=%d", ret, (int)bytes_written);
 
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Write error: %s", esp_err_to_name(ret));

@@ -18,7 +18,7 @@
 #define TAG "WS_CLIENT"
 
 /* WebSocket configuration (MVP: hardcoded) */
-#define WS_SERVER_URL  "ws://192.168.31.10:8766"
+#define WS_SERVER_URL  "ws://192.168.31.152:8765"
 #define WS_TIMEOUT_MS  10000
 
 static esp_websocket_client_handle_t ws_client = NULL;
@@ -54,7 +54,8 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                 /* Handle server text messages */
                 char *msg = strndup((char *)data->data_ptr, data->data_len);
                 if (msg) {
-                    ESP_LOGI(TAG, "Received text: %s", msg);
+                    /* Use ESP_LOGD to avoid flooding logs with high-frequency messages */
+                    ESP_LOGD(TAG, "Received text: %s", msg);
 
                     /* End TTS playback when receiving tts_end or non-TTS message */
                     if (tts_playing) {

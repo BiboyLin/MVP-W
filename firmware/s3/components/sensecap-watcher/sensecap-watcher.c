@@ -702,7 +702,7 @@ static lv_indev_t *bsp_knob_indev_init(lv_disp_t *disp)
     };
     const static button_config_t btn_config = {
         .type = BUTTON_TYPE_CUSTOM,
-        .long_press_time = 2000,
+        .long_press_time = 500,   /* Reduced from 2000ms to 500ms for faster voice trigger */
         .short_press_time = 200,
         .custom_button_config = {
             .active_level = 0,
@@ -920,6 +920,13 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(BSP_AUDIO_I2S_NUM, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true; // Auto clear the legacy data in the DMA buffer
     chan_cfg.intr_priority = 4;
+    /* Increase DMA buffer size to reduce audio playback stuttering
+     * Default: dma_desc_num=2, dma_frame_num=240 (~480 frames total)
+     * New: dma_desc_num=6, dma_frame_num=480 (~2880 frames total, 6x larger)
+     * This provides ~120ms buffer at 24kHz/16-bit/mono, reducing blocking
+     */
+    chan_cfg.dma_desc_num = 6;
+    chan_cfg.dma_frame_num = 480;
     BSP_ERROR_CHECK_RETURN_ERR(i2s_new_channel(&chan_cfg, &i2s_tx_chan, &i2s_rx_chan));
 
     /* Setup I2S channels */

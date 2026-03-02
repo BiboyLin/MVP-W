@@ -6,24 +6,38 @@ typedef enum {
     SERVO_Y = 1,  /* GPIO 15 — up/down    */
 } servo_axis_t;
 
-/** Initialize LEDC timer and channels for both servo axes. */
+/**
+ * Initialize LEDC timer, channels, and start background smooth task.
+ * Must be called once at startup.
+ */
 void servo_control_init(void);
 
 /**
- * Set one servo axis to a target angle immediately.
+ * Set target angle with automatic smoothing.
+ * The servo will smoothly move to target in background.
  * @param axis   SERVO_X or SERVO_Y
- * @param angle  0-180 (clamped)
+ * @param angle  Target angle (0-180), float is rounded to integer
  */
-void servo_set_angle(servo_axis_t axis, int angle);
+void servo_set_angle(servo_axis_t axis, float angle);
 
 /**
- * Smoothly interpolate both axes to target positions.
- * Blocks the calling task for ~duration_ms.
- * @param x_target   Target X angle (0-180)
- * @param y_target   Target Y angle (0-180)
- * @param duration_ms  Movement duration in milliseconds
+ * Set angle immediately without smoothing.
+ * Use for initialization or emergency positioning.
+ * @param axis   SERVO_X or SERVO_Y
+ * @param angle  Target angle (0-180)
  */
-void servo_smooth_move(int x_target, int y_target, int duration_ms);
+void servo_set_angle_immediate(servo_axis_t axis, int angle);
 
-/** Return current commanded angle for an axis. */
+/**
+ * Get current actual angle (may differ from target during movement).
+ * @param axis   SERVO_X or SERVO_Y
+ * @return       Current angle (0-180)
+ */
 int servo_get_angle(servo_axis_t axis);
+
+/**
+ * Get target angle (last commanded value).
+ * @param axis   SERVO_X or SERVO_Y
+ * @return       Target angle (0-180)
+ */
+int servo_get_target(servo_axis_t axis);
