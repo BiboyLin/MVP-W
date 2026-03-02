@@ -100,11 +100,14 @@ int hal_audio_start(void)
         }
     }
 
-    /* Resume codec if it was stopped (e.g., by sample rate switch) */
-    bsp_codec_dev_resume();
+    /* NOTE: Don't call bsp_codec_dev_resume() here because it uses
+     * hardcoded DRV_AUDIO_SAMPLE_RATE (16kHz), which would override
+     * the sample rate we just set in hal_audio_set_sample_rate().
+     * The sample rate is already configured correctly.
+     */
 
     is_running = true;
-    ESP_LOGI(TAG, "Audio started");
+    ESP_LOGI(TAG, "Audio started (sample rate: %lu Hz)", current_sample_rate);
     return 0;
 }
 
