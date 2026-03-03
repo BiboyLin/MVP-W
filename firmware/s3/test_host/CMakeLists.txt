@@ -62,6 +62,16 @@ target_include_directories(test_display_ui PRIVATE ${INCLUDE_DIRS})
 target_link_libraries(test_display_ui PRIVATE unity)
 
 # ------------------------------------------------------------------ #
+# Test: Wake Word Detection
+# ------------------------------------------------------------------ #
+add_executable(test_wake_word
+    ../main/button_voice.c
+    test_wake_word.c
+)
+target_include_directories(test_wake_word PRIVATE ${INCLUDE_DIRS})
+target_link_libraries(test_wake_word PRIVATE unity)
+
+# ------------------------------------------------------------------ #
 # CTest
 # ------------------------------------------------------------------ #
 enable_testing()
@@ -69,9 +79,10 @@ add_test(NAME WS_Router      COMMAND test_ws_router)
 add_test(NAME UART_Bridge    COMMAND test_uart_bridge)
 add_test(NAME Button_Voice   COMMAND test_button_voice)
 add_test(NAME Display_UI     COMMAND test_display_ui)
+add_test(NAME Wake_Word      COMMAND test_wake_word)
 
 # Run all tests
 add_custom_target(test_all
     COMMAND ctest --output-on-failure
-    DEPENDS test_ws_router test_uart_bridge test_button_voice test_display_ui
+    DEPENDS test_ws_router test_uart_bridge test_button_voice test_display_ui test_wake_word
 )

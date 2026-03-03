@@ -17,6 +17,8 @@ idf_component_register(
         # SPIFFS-based emoji animation system
         "emoji_png.c"
         "emoji_anim.c"
+        # Wake word detection (conditional via Kconfig)
+        "hal_wake_word.c"
     INCLUDE_DIRS "."
     REQUIRES esp_wifi esp_netif esp_event driver nvs_flash sensecap-watcher spiffs
 )

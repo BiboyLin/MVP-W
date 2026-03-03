@@ -2,6 +2,7 @@
 #include "hal_audio.h"
 #include "hal_opus.h"
 #include "hal_button.h"
+#include "hal_wake_word.h"
 #include "ws_client.h"
 #include "display_ui.h"
 #include "esp_log.h"
@@ -11,6 +12,20 @@
 #include <math.h>
 
 #define TAG "VOICE"
+
+/* ------------------------------------------------------------------ */
+/* Private: Wake word context                                         */
+/* ------------------------------------------------------------------ */
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+static wake_word_ctx_t *g_wake_word_ctx = NULL;
+
+/* Forward declarations for */
+#ifdef CONFIG_ENABLE_WAKE_WORD
+static void on_wake_word_detected(const char *wake_word, void *user_data);
+static int wake_word_setup(void);
+static void wake_word_cleanup(void);
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Private: State and statistics                                       */
@@ -112,7 +127,13 @@ void voice_recorder_process_event(voice_event_t event)
 {
     switch (g_state) {
         case VOICE_STATE_IDLE:
-            if (event == VOICE_EVENT_BUTTON_PRESS) {
+            if (event == VOICE_EVENT_BUTTON_PRESS ||
+                event == VOICE_EVENT_WAKE_WORD) {
+#ifdef CONFIG_ENABLE_WAKE_WORD
+                if (event == VOICE_EVENT_WAKE_WORD) {
+                    ESP_LOGI(TAG, "Wake word triggered recording");
+                }
+#endif
                 start_recording();
             }
             break;
@@ -132,12 +153,40 @@ void voice_recorder_process_event(voice_event_t event)
 
 int voice_recorder_tick(void)
 {
+    /* Always read audio when wake word detection is enabled */
+    int pcm_len = 0;
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Read audio for both wake word detection and recording */
+    pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
+    if (pcm_len < 0) {
+        ESP_LOGE(TAG, "Audio read error");
+        g_stats.error_count++;
+        return -1;
+    }
+    if (pcm_len == 0) {
+        return 0;  /* No data available */
+    }
+
+    int16_t *samples = (int16_t *)g_pcm_buf;
+    size_t num_samples = pcm_len / 2;  /* 16-bit samples */
+
+    /* Feed wake word detector when idle (local detection, no network) */
+    if (g_state == VOICE_STATE_IDLE && g_wake_word_ctx != NULL) {
+        hal_wake_word_feed(g_wake_word_ctx, samples, num_samples);
+    }
+
+    /* Only send to WebSocket when recording */
+    if (g_state != VOICE_STATE_RECORDING) {
+        return 0;
+    }
+#else
+    /* Original behavior: only read when recording */
     if (g_state != VOICE_STATE_RECORDING) {
         return 0;
     }
 
-    /* Read audio samples (PCM: 16-bit, 16kHz, mono) */
-    int pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
+    pcm_len = hal_audio_read(g_pcm_buf, PCM_FRAME_SIZE);
     if (pcm_len < 0) {
         ESP_LOGE(TAG, "Audio read error");
         g_stats.error_count++;
@@ -148,9 +197,12 @@ int voice_recorder_tick(void)
         return 0;  /* No data available */
     }
 
-    /* Audio quality check: calculate RMS and peak */
     int16_t *samples = (int16_t *)g_pcm_buf;
-    int sample_count = pcm_len / 2;  /* 16-bit samples */
+    size_t num_samples = pcm_len / 2;  /* 16-bit samples */
+#endif
+
+    /* Audio quality check: calculate RMS and peak */
+    int sample_count = pcm_len / 2;
     int64_t sum_sq = 0;
     int16_t peak = 0;
     int zero_count = 0;
@@ -238,6 +290,13 @@ static void voice_recorder_task(void *arg)
 
 int voice_recorder_start(void)
 {
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Initialize wake word detector */
+    if (wake_word_setup() != 0) {
+        ESP_LOGW(TAG, "Wake word setup failed, continuing without wake word");
+    }
+#endif
+
     /* Initialize button via IO expander */
     if (hal_button_init(button_callback) != 0) {
         ESP_LOGE(TAG, "Button init failed");
@@ -278,6 +337,11 @@ void voice_recorder_stop(void)
     if (g_voice_task_handle) {
         vTaskDelay(pdMS_TO_TICKS(100));  /* Wait for task to exit */
     }
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Cleanup wake word detector */
+    wake_word_cleanup();
+#endif
 
     hal_button_deinit();
     ESP_LOGI(TAG, "Voice recorder stopped");

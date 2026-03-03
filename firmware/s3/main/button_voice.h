@@ -16,6 +16,7 @@ typedef enum {
     VOICE_EVENT_BUTTON_PRESS,   /* Button pressed - start recording */
     VOICE_EVENT_BUTTON_RELEASE, /* Button released - stop recording */
     VOICE_EVENT_TIMEOUT,        /* Max recording time reached */
+    VOICE_EVENT_WAKE_WORD,      /* Wake word detected - start recording */
 } voice_event_t;
 
 /* Voice recorder statistics */
