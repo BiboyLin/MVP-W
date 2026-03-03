@@ -20,12 +20,11 @@
 #ifdef CONFIG_ENABLE_WAKE_WORD
 static wake_word_ctx_t *g_wake_word_ctx = NULL;
 
-/* Forward declarations for */
-#ifdef CONFIG_ENABLE_WAKE_WORD
+/* Forward declarations */
 static void on_wake_word_detected(const char *wake_word, void *user_data);
 static int wake_word_setup(void);
 static void wake_word_cleanup(void);
-#endif
+#endif /* CONFIG_ENABLE_WAKE_WORD */
 
 /* ------------------------------------------------------------------ */
 /* Private: State and statistics                                       */
@@ -283,6 +282,52 @@ static void voice_recorder_task(void *arg)
     g_voice_task_handle = NULL;
     vTaskDelete(NULL);
 }
+
+/* ------------------------------------------------------------------ */
+/* Private: Wake word callback                                        */
+/* ------------------------------------------------------------------ */
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+static void on_wake_word_detected(const char *wake_word, void *user_data)
+{
+    ESP_LOGI(TAG, "Wake word detected: %s", wake_word);
+    display_update("Listening...", "listening", 0, NULL);
+    voice_recorder_process_event(VOICE_EVENT_WAKE_WORD);
+}
+
+static int wake_word_setup(void)
+{
+    wake_word_config_t config = {
+        .model_path = NULL,  /* Use default */
+        .callback = on_wake_word_detected,
+        .user_data = NULL,
+    };
+
+#ifdef CONFIG_WAKE_WORD_CUSTOM
+    config.wake_word_phrase = CONFIG_CUSTOM_WAKE_WORD_PHRASE;
+    config.detection_threshold = (float)CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
+#endif
+
+    g_wake_word_ctx = hal_wake_word_init(&config);
+    if (g_wake_word_ctx == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize wake word detector");
+        return -1;
+    }
+
+    hal_wake_word_start(g_wake_word_ctx);
+    ESP_LOGI(TAG, "Wake word detection enabled");
+    return 0;
+}
+
+static void wake_word_cleanup(void)
+{
+    if (g_wake_word_ctx != NULL) {
+        hal_wake_word_stop(g_wake_word_ctx);
+        hal_wake_word_deinit(g_wake_word_ctx);
+        g_wake_word_ctx = NULL;
+    }
+}
+#endif /* CONFIG_ENABLE_WAKE_WORD */
 
 /* ------------------------------------------------------------------ */
 /* Public: Start voice recorder system (with button and task)         */
