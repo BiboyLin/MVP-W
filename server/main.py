@@ -929,7 +929,7 @@ class MainWindow(QMainWindow):
 
     def send_servo_command(self) -> None:
         """Send servo test command"""
-        msg = json.dumps({"type": "servo", "x": 90, "y": 45})
+        msg = json.dumps({"type": "servo", "code": 0, "data": {"x": 90, "y": 120}})
         self.send_command(msg)
 
     def send_display_command(self) -> None:
@@ -988,8 +988,8 @@ class MainWindow(QMainWindow):
         x = random.randint(x_min, x_max)
         y = random.randint(y_min, y_max)
 
-        # Send command
-        msg = json.dumps({"type": "servo", "x": x, "y": y})
+        # Send command with v2.0 protocol format
+        msg = json.dumps({"type": "servo", "code": 0, "data": {"x": x, "y": y}})
 
         if self.ws_thread and self.ws_thread.loop:
             asyncio.run_coroutine_threadsafe(
