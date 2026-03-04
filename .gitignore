@@ -10,6 +10,8 @@ sdkconfig
 sdkconfig.old
 .pytest_cache/
 __pycache__/
+managed_components/
+dependencies.lock
 
 # Python
 venv/
