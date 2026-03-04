@@ -1,4 +1,30 @@
 dependencies:
+  esp_io_expander_pca95xx_16bit:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\esp_io_expander_pca95xx_16bit
+      type: local
+    version: 1.0.0
+  esp_lvgl_port:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\esp_lvgl_port
+      type: local
+    version: 1.4.0
+  espressif/button:
+    component_hash: b115c8797f89b883265441aeedf4973a6d49c53bec55159767cdd9cbcd27f328
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.2.3
   espressif/cmake_utilities:
     component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
@@ -6,11 +32,79 @@ dependencies:
       require: private
       version: '>=4.1'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 0.5.3
+  espressif/dl_fft:
+    component_hash: 7dadbd644c0d7ba4733cc3726ec4cff6edf27b043725e1115861dec1609a3d28
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 0.3.1
+  espressif/eigen:
+    component_hash: 64a82d75ea6b7cb9240398ce0b6616e905d71b83a734b2cf9cb58ad09dd4f5ea
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.3.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 3.4.0~2
+  espressif/esp-dsp:
+    component_hash: 42dce32d46ac93dc11f60d368e29a830e9661c7345d794b8a45c343479cae636
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.2'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.7.0
+  espressif/esp-sr:
+    component_hash: 46b1f70f8b561714b958d1c455213cca07162755d1b8df53498081199f15136f
+    dependencies:
+    - name: espressif/dl_fft
+      registry_url: https://components.espressif.com
+      require: private
+      version: '>=0.2.0'
+    - name: espressif/esp-dsp
+      registry_url: https://components.espressif.com
+      require: private
+      version: 1.7.0
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.3.1
+  espressif/esp_codec_dev:
+    component_hash: 014948481bda426cd46714f297fe1891711246c62bea288863a8cc8cf13ef1f0
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.2.0
+  espressif/esp_io_expander:
+    component_hash: fbc0de4082fc7c207dc98a93a0ed83d1a929a4ecee83cc567afb406f3ee6d4a6
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.1
   espressif/esp_lcd_spd2010:
-    component_hash: 8637c97feeb8d83ba637599f6bf4ef30e83595486930e7df17ffa24f3fef1242
+    component_hash: 379ef3244d182f659d26f3375271508979c3aac08cc7f56e390ef722aa9348a7
     dependencies:
     - name: idf
       require: private
@@ -22,21 +116,35 @@ dependencies:
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.0.2
-  espressif/esp_lvgl_port:
-    component_hash: b6360960f47b6776462e7092861b3ea66477ffb762a01baa0aecbb3d74cd50f4
+    version: 1.0.1
+  espressif/esp_lcd_touch:
+    component_hash: 779b4ba2464a3ae85681e4b860caa5fdc35801458c23f3039ee761bae7f442a4
     dependencies:
     - name: idf
       require: private
-      version: '>=5.1'
-    - name: lvgl/lvgl
-      registry_url: https://components.espressif.com
-      require: public
-      version: '>=8,<10'
+      version: '>=4.4.2'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 2.7.2
+    version: 1.1.2
+  espressif/esp_lcd_touch_spd2010:
+    component_hash: 62f76d1f2c7ba4f11ff51746b8e62269ea4a3d2a774070f9ad606105a560f72f
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: espressif/esp_lcd_touch
+      registry_url: https://components.espressif.com
+      require: public
+      version: ^1
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 0.0.1
   espressif/esp_websocket_client:
     component_hash: c5a067a9fddea370c478017e66fac302f4b79c3d4027e9bdd42a019786cceb92
     dependencies:
@@ -47,22 +155,70 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.6.1
+  espressif/led_strip:
+    component_hash: fc66f8544851132555bc668475f7b68acd6a211c8075db5ce1951cbfa27dfb88
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.5.4
   idf:
     source:
       type: idf
     version: 5.2.1
-  lvgl/lvgl:
-    component_hash: a0525d74dd85092059565b91030daf539a76cce82386972ffebbde67016eb730
+  knob:
     dependencies: []
     source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 8.3.9
+      path: D:\GithubRep\WatcherProject\Watcher-Firmware\components\knob
+      type: local
+    version: 0.1.4
+  lvgl:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\lvgl
+      type: local
+    version: 8.4.0
+  lvgl/lvgl:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\lvgl
+      type: local
+    version: 8.4.0
+  sensecap-watcher:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\sensecap-watcher
+      type: local
+    version: 1.0.0
+  sscma_client:
+    dependencies: []
+    source:
+      path: D:\GithubRep\WatcherProject\MVP-W\firmware\s3\components\sscma_client
+      type: local
+    version: 1.0.2
 direct_dependencies:
+- esp_io_expander_pca95xx_16bit
+- esp_lvgl_port
+- espressif/button
+- espressif/cmake_utilities
+- espressif/eigen
+- espressif/esp-sr
+- espressif/esp_codec_dev
+- espressif/esp_io_expander
 - espressif/esp_lcd_spd2010
-- espressif/esp_lvgl_port
+- espressif/esp_lcd_touch
+- espressif/esp_lcd_touch_spd2010
 - espressif/esp_websocket_client
+- espressif/knob
+- espressif/led_strip
+- idf
+- lvgl
 - lvgl/lvgl
-manifest_hash: 332533b41d695beca495abe741247c179146638322879ac7ea84d2e56e8f2dce
+- sensecap-watcher
+- sscma_client
+manifest_hash: 092ac75a0af5f8069d0c91cdce802ff982713f5279ef51527368077542a29442
 target: esp32s3
 version: 2.0.0

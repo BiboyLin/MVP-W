@@ -160,11 +160,14 @@ static lv_img_dsc_t* load_png_image(const char *filepath)
         return NULL;
     }
 
-    /* Use same settings as factory_firmware for PNG compatibility */
+    /* CRITICAL: Use LV_IMG_CF_RAW_ALPHA for PNG data that needs decoding
+     * This is the correct format for PNG images according to LVGL examples
+     * LV_IMG_CF_TRUE_COLOR_ALPHA = already decoded pixels (wrong for PNG)
+     * LV_IMG_CF_RAW_ALPHA = raw data with alpha (PNG decoder will handle it) */
     img_dsc->header.always_zero = 0;
     img_dsc->header.w = 412;
     img_dsc->header.h = 412;  /* Emoji images are 412x412 */
-    img_dsc->header.cf = LV_IMG_CF_TRUE_COLOR_ALPHA;
+    img_dsc->header.cf = LV_IMG_CF_RAW_ALPHA;  /* Correct format for PNG with alpha */
     img_dsc->data_size = file_size;
     img_dsc->data = data;
 
