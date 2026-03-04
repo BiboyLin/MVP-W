@@ -17,7 +17,7 @@
 
 /* External CJK font for Chinese character support */
 #if LV_FONT_SIMSUN_16_CJK
-extern lv_font_t lv_font_simsun_16_cjk;
+extern const lv_font_t lv_font_simsun_16_cjk;
 #endif
 
 #define TAG "HAL_DISPLAY"

@@ -96,7 +96,7 @@ static void detection_task(void *arg)
         }
 
         /* Fetch detection result */
-        esp_afe_sr_result_t *res = ctx->afe_iface->fetch_with_delay(ctx->afe_data, portMAX_DELAY);
+        afe_fetch_result_t *res = ctx->afe_iface->fetch(ctx->afe_data);
 
         if (res == NULL || res->ret_value == ESP_FAIL) {
             continue;
@@ -218,18 +218,23 @@ wake_word_ctx_t *hal_wake_word_init(const wake_word_config_t *config)
     }
 
     /* Log available models */
+    ESP_LOGI(TAG, "Total models loaded: %d", ctx->models->num);
     for (int i = 0; i < ctx->models->num; i++) {
         ESP_LOGI(TAG, "Model %d: %s", i, ctx->models->model_name[i]);
     }
 
     /* Find wakenet model and get wake words */
     const char *wakenet_model = NULL;
+    ESP_LOGI(TAG, "Looking for wakenet model with prefix: %s", ESP_WN_PREFIX);
     for (int i = 0; i < ctx->models->num; i++) {
+        ESP_LOGD(TAG, "Checking model %d: %s (contains 'wn': %s)",
+                 i, ctx->models->model_name[i],
+                 strstr(ctx->models->model_name[i], ESP_WN_PREFIX) ? "yes" : "no");
         if (strstr(ctx->models->model_name[i], ESP_WN_PREFIX) != NULL) {
             wakenet_model = ctx->models->model_name[i];
 
             /* Get wake words string */
-            const char *wake_words_str = esp_srmodel_get_wake_words(ctx->models, wakenet_model);
+            const char *wake_words_str = esp_srmodel_get_wake_words(ctx->models, (char *)wakenet_model);
             if (wake_words_str != NULL) {
                 parse_wake_words(ctx, wake_words_str);
             }

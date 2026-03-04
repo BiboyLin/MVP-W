@@ -46,6 +46,14 @@ void voice_recorder_init(void)
 {
     g_state = VOICE_STATE_IDLE;
     memset(&g_stats, 0, sizeof(g_stats));
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Start audio immediately for wake word detection */
+    ESP_LOGI(TAG, "Wake word enabled, starting audio for continuous detection");
+    if (hal_audio_start() != 0) {
+        ESP_LOGE(TAG, "Failed to start audio for wake word detection");
+    }
+#endif
 }
 
 /* ------------------------------------------------------------------ */
