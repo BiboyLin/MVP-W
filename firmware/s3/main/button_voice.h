@@ -72,6 +72,12 @@ int voice_recorder_start(void);
  */
 void voice_recorder_stop(void);
 
+/**
+ * Resume wake word detection after TTS playback
+ * Called when TTS playback completes to re-enable wake word detection
+ */
+void voice_recorder_resume_wake_word(void);
+
 /* ------------------------------------------------------------------ */
 /* HAL Interface (to be implemented by hardware/audio layer)          */
 /* ------------------------------------------------------------------ */

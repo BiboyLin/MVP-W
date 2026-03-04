@@ -531,3 +531,17 @@ void voice_recorder_stop(void)
     hal_button_deinit();
     ESP_LOGI(TAG, "Voice recorder stopped");
 }
+
+/* ------------------------------------------------------------------ */
+/* Public: Resume wake word detection after TTS                       */
+/* ------------------------------------------------------------------ */
+
+void voice_recorder_resume_wake_word(void)
+{
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    if (g_wake_word_ctx != NULL) {
+        ESP_LOGI(TAG, "Resuming wake word detection");
+        hal_wake_word_start(g_wake_word_ctx);
+    }
+#endif
+}

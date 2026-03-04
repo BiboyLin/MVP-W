@@ -7,6 +7,7 @@
 #include "ws_router.h"
 #include "display_ui.h"
 #include "hal_audio.h"
+#include "button_voice.h"
 #include "esp_websocket_client.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -266,6 +267,15 @@ void ws_tts_complete(void)
         hal_audio_stop();
         /* Restore 16kHz for recording */
         hal_audio_set_sample_rate(16000);
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        /* In wake word mode, restart audio for continuous wake word detection */
+        ESP_LOGI(TAG, "Restarting audio for wake word detection");
+        hal_audio_start();
+        /* Resume wake word detection (was stopped when wake word detected) */
+        voice_recorder_resume_wake_word();
+#endif
+
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
     }
