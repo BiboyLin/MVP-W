@@ -8,6 +8,7 @@ build/
 # ESP-IDF
 sdkconfig
 sdkconfig.old
+sdkconfig.backup
 .pytest_cache/
 __pycache__/
 managed_components/
