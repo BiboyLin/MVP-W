@@ -33,6 +33,9 @@ static void wake_word_cleanup(void);
 static voice_state_t g_state = VOICE_STATE_IDLE;
 static voice_stats_t g_stats = {0};
 
+/* Track how recording was triggered (for button behavior) */
+static bool g_recording_triggered_by_wake_word = false;
+
 /* Audio buffer for PCM data (16kHz, 16-bit, 60ms frame = 1920 bytes) */
 #define PCM_FRAME_SIZE  1920
 
@@ -113,7 +116,15 @@ static int start_recording(void)
 
 static int stop_recording(void)
 {
+    /* In wake word mode, keep audio running for continuous detection */
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    if (!g_recording_triggered_by_wake_word) {
+        hal_audio_stop();
+    }
+    /* Wake word mode: audio stays running for next detection */
+#else
     hal_audio_stop();
+#endif
 
     /* Send audio end marker */
     if (ws_send_audio_end() != 0) {
@@ -123,6 +134,7 @@ static int stop_recording(void)
 
     g_state = VOICE_STATE_IDLE;
     g_stats.record_count++;
+    g_recording_triggered_by_wake_word = false;  /* Reset trigger flag */
     return 0;
 }
 
@@ -253,13 +265,26 @@ static void button_callback(bool pressed)
 {
     /* This is called from task context (via hal_button_poll) */
     if (pressed) {
-        ESP_LOGI(TAG, "Button PRESSED - starting recording");
-        voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
-        display_update("Recording...", "normal", 0, NULL);
+        if (g_state == VOICE_STATE_IDLE) {
+            /* Button triggers recording start */
+            ESP_LOGI(TAG, "Button PRESSED - starting recording");
+            g_recording_triggered_by_wake_word = false;
+            voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
+            display_update("Recording...", "normal", 0, NULL);
+        } else if (g_state == VOICE_STATE_RECORDING) {
+            /* Already recording (wake word mode) - short press to stop */
+            ESP_LOGI(TAG, "Button PRESSED (short) - stopping recording (wake word mode)");
+            voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+            display_update("Processing...", "thinking", 0, NULL);
+        }
     } else {
-        ESP_LOGI(TAG, "Button RELEASED - stopping recording");
-        voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
-        display_update("Processing...", "thinking", 0, NULL);
+        /* Button RELEASED - only stop if triggered by button (long press mode) */
+        if (g_state == VOICE_STATE_RECORDING && !g_recording_triggered_by_wake_word) {
+            ESP_LOGI(TAG, "Button RELEASED - stopping recording");
+            voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE);
+            display_update("Processing...", "thinking", 0, NULL);
+        }
+        /* If wake word triggered, ignore release (already stopped by short press) */
     }
 }
 
@@ -299,6 +324,7 @@ static void voice_recorder_task(void *arg)
 static void on_wake_word_detected(const char *wake_word, void *user_data)
 {
     ESP_LOGI(TAG, "Wake word detected: %s", wake_word);
+    g_recording_triggered_by_wake_word = true;  /* Mark as wake word triggered */
     display_update("Listening...", "listening", 0, NULL);
     voice_recorder_process_event(VOICE_EVENT_WAKE_WORD);
 }
