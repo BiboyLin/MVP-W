@@ -1,5 +1,6 @@
 #pragma once
 #include "servo_math.h"
+#include <stdbool.h>
 
 typedef enum {
     SERVO_X = 0,  /* GPIO 12 — left/right */
@@ -19,6 +20,14 @@ void servo_control_init(void);
  * @param angle  Target angle (0-180), float is rounded to integer
  */
 void servo_set_angle(servo_axis_t axis, float angle);
+
+/**
+ * Set target angles for BOTH servos atomically (synchronized start).
+ * Both servos will start moving at exactly the same time.
+ * @param x  X-axis target angle (0-180)
+ * @param y  Y-axis target angle (90-150)
+ */
+void servo_set_angle_sync(int x, int y);
 
 /**
  * Set angle immediately without smoothing.
@@ -41,3 +50,9 @@ int servo_get_angle(servo_axis_t axis);
  * @return       Target angle (0-180)
  */
 int servo_get_target(servo_axis_t axis);
+
+/**
+ * Check if either servo is still moving toward target.
+ * @return  true if any servo is moving
+ */
+bool servo_is_moving(void);

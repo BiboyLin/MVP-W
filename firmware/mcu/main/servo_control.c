@@ -22,8 +22,12 @@
 #define SERVO_Y_MIN     90
 #define SERVO_Y_MAX     150
 
-static int s_current[2] = {90, 120};   /* current actual angles */
-static int s_target[2]  = {90, 120};   /* target angles from commands */
+static int s_current[2] = {90, 90};    /* current actual angles */
+static int s_target[2]  = {90, 90};    /* target angles from commands */
+static int s_start[2]   = {90, 90};    /* start angles for synchronized move */
+static int s_steps[2]   = {0, 0};      /* total steps needed for sync move */
+static int s_step[2]    = {0, 0};      /* current step in sync move */
+static bool s_sync_mode = false;       /* true = use synchronized interpolation */
 static TaskHandle_t s_smooth_task = NULL;
 
 /* ------------------------------------------------------------------ */
@@ -41,20 +45,51 @@ static void servo_smooth_task(void *arg)
 {
     (void)arg;
     while (1) {
-        for (int axis = 0; axis < 2; axis++) {
-            int cur = s_current[axis];
-            int tgt = s_target[axis];
+        if (s_sync_mode) {
+            /* Synchronized mode: both axes move proportionally to finish together */
+            bool still_moving = false;
 
-            if (cur != tgt) {
-                /* Move one step toward target */
-                if (abs(tgt - cur) <= SMOOTH_SPEED) {
-                    s_current[axis] = tgt;
-                } else if (tgt > cur) {
-                    s_current[axis] = cur + SMOOTH_SPEED;
-                } else {
-                    s_current[axis] = cur - SMOOTH_SPEED;
+            for (int axis = 0; axis < 2; axis++) {
+                if (s_step[axis] < s_steps[axis]) {
+                    s_step[axis]++;
+
+                    /* Linear interpolation: current = start + (target - start) * progress */
+                    int progress = s_step[axis];
+                    int total = s_steps[axis];
+                    int interpolated = s_start[axis] + (s_target[axis] - s_start[axis]) * progress / total;
+
+                    s_current[axis] = interpolated;
+                    servo_apply_hardware(axis, interpolated);
+                    still_moving = true;
                 }
-                servo_apply_hardware(axis, s_current[axis]);
+            }
+
+            /* Exit sync mode when both axes complete */
+            if (!still_moving) {
+                s_sync_mode = false;
+                /* Ensure we end exactly at target */
+                s_current[0] = s_target[0];
+                s_current[1] = s_target[1];
+                servo_apply_hardware(SERVO_X, s_target[0]);
+                servo_apply_hardware(SERVO_Y, s_target[1]);
+            }
+        } else {
+            /* Independent mode: each axis moves at its own pace */
+            for (int axis = 0; axis < 2; axis++) {
+                int cur = s_current[axis];
+                int tgt = s_target[axis];
+
+                if (cur != tgt) {
+                    /* Move one step toward target */
+                    if (abs(tgt - cur) <= SMOOTH_SPEED) {
+                        s_current[axis] = tgt;
+                    } else if (tgt > cur) {
+                        s_current[axis] = cur + SMOOTH_SPEED;
+                    } else {
+                        s_current[axis] = cur - SMOOTH_SPEED;
+                    }
+                    servo_apply_hardware(axis, s_current[axis]);
+                }
             }
         }
         vTaskDelay(pdMS_TO_TICKS(STEP_MS));
@@ -89,7 +124,7 @@ void servo_control_init(void)
     /* Configure Y channel */
     ledc_channel_config_t ch_y = {
         .channel    = LEDC_CH_Y,
-        .duty       = angle_to_duty(120),
+        .duty       = angle_to_duty(90),
         .gpio_num   = SERVO_Y_GPIO,
         .speed_mode = LEDC_MODE,
         .hpoint     = 0,
@@ -118,8 +153,66 @@ void servo_set_angle(servo_axis_t axis, float angle)
         if (rounded > SERVO_Y_MAX) rounded = SERVO_Y_MAX;
     }
 
+    /* Disable sync mode when setting individual axis */
+    s_sync_mode = false;
+
     /* Set target - background task will smooth to it */
     s_target[axis] = rounded;
+}
+
+/* ------------------------------------------------------------------ */
+
+void servo_set_angle_sync(int x, int y)
+{
+    /* Clamp X axis */
+    if (x < 0) x = 0;
+    if (x > 180) x = 180;
+
+    /* Clamp Y axis (with mechanical protection) */
+    if (y < SERVO_Y_MIN) y = SERVO_Y_MIN;
+    if (y > SERVO_Y_MAX) y = SERVO_Y_MAX;
+
+    /* Store start positions (current actual angles) */
+    s_start[0] = s_current[0];
+    s_start[1] = s_current[1];
+
+    /* Store target positions */
+    s_target[0] = x;
+    s_target[1] = y;
+
+    /* Calculate steps needed for each axis */
+    int dist_x = abs(x - s_start[0]);
+    int dist_y = abs(y - s_start[1]);
+    int steps_x = (dist_x + SMOOTH_SPEED - 1) / SMOOTH_SPEED;  /* ceil division */
+    int steps_y = (dist_y + SMOOTH_SPEED - 1) / SMOOTH_SPEED;
+
+    /* Use the maximum steps for BOTH axes so they finish together */
+    int max_steps = steps_x > steps_y ? steps_x : steps_y;
+
+    /* If already at target, no movement needed */
+    if (max_steps == 0) {
+        s_sync_mode = false;
+        return;
+    }
+
+    s_steps[0] = max_steps;
+    s_steps[1] = max_steps;
+    s_step[0] = 0;
+    s_step[1] = 0;
+
+    /* Enable synchronized mode */
+    s_sync_mode = true;
+}
+
+/* ------------------------------------------------------------------ */
+
+bool servo_is_moving(void)
+{
+    if (s_sync_mode) {
+        return (s_step[0] < s_steps[0]) || (s_step[1] < s_steps[1]);
+    } else {
+        return (s_current[0] != s_target[0]) || (s_current[1] != s_target[1]);
+    }
 }
 
 /* ------------------------------------------------------------------ */
