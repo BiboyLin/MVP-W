@@ -74,15 +74,23 @@ void hal_audio_set_sample_rate(uint32_t sample_rate)
 
     ESP_LOGI(TAG, "Switching sample rate: %lu -> %lu", current_sample_rate, sample_rate);
 
+    /* Remember if audio was running before switch */
+    bool was_running = is_running;
+
     /* Stop codec first to flush DMA buffers and avoid glitch noise */
     bsp_codec_dev_stop();
 
     /* Small delay to ensure DMA is fully flushed */
     vTaskDelay(pdMS_TO_TICKS(10));
 
-    /* Set new sample rate */
+    /* Set new sample rate (16-bit, mono channel) */
     bsp_codec_set_fs(sample_rate, 16, 1);
     current_sample_rate = sample_rate;
+
+    /* Restart audio stream if it was running before */
+    if (was_running) {
+        bsp_codec_dev_resume();
+    }
 
     ESP_LOGI(TAG, "Sample rate switch complete");
 }
@@ -113,16 +121,32 @@ int hal_audio_start(void)
 
 int hal_audio_read(uint8_t *out_buf, int max_len)
 {
-    if (!is_running || !mic_handle) {
+    if (!mic_handle) {
         return -1;
+    }
+
+    /* In wake word mode, audio should always be available */
+    /* If is_running is false, return 0 (no data) instead of -1 (error) to avoid error spam */
+    if (!is_running) {
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        return 0;  /* In wake word mode, gracefully handle temporary unavailability */
+#else
+        return -1;
+#endif
     }
 
     size_t bytes_read = 0;
     esp_err_t ret = bsp_i2s_read(out_buf, max_len, &bytes_read, 100);
 
     if (ret != ESP_OK) {
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        /* In wake word mode, temporary read errors are expected during sample rate switches */
+        ESP_LOGD(TAG, "Read temporarily unavailable: %s", esp_err_to_name(ret));
+        return 0;
+#else
         ESP_LOGE(TAG, "Read error: %s", esp_err_to_name(ret));
         return -1;
+#endif
     }
 
     return (int)bytes_read;

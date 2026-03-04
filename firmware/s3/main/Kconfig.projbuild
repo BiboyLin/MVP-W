@@ -55,4 +55,35 @@ config WAKE_WORD_DETECTION_TIMEOUT_MS
         Maximum recording duration after wake word detection.
         After this timeout, recording stops automatically.
 
+config VAD_SILENCE_TIMEOUT_MS
+    int "VAD Silence Timeout (ms)"
+    default 3000
+    depends on ENABLE_WAKE_WORD
+    help
+        Duration of silence before automatically stopping recording.
+        After detecting continuous silence for this duration,
+        recording will stop automatically.
+        Set to 0 to disable VAD-based stopping.
+
+config VAD_RMS_THRESHOLD
+    int "VAD RMS Threshold"
+    default 100
+    depends on ENABLE_WAKE_WORD
+    help
+        RMS threshold for silence detection.
+        Audio frames with RMS below this value are considered silent.
+        Lower values = less sensitive (more audio considered as speech).
+        Higher values = more sensitive (more audio considered as silence).
+        Typical range: 50-500.
+
+config VAD_MIN_SPEECH_MS
+    int "VAD Minimum Speech Duration (ms)"
+    default 300
+    depends on ENABLE_WAKE_WORD
+    help
+        Minimum speech duration before VAD can trigger stop.
+        Prevents premature stopping right after wake word.
+        Recording must have at least this much speech content
+        before silence timeout can stop it.
+
 endmenu

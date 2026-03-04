@@ -42,6 +42,86 @@ static bool g_recording_triggered_by_wake_word = false;
 static uint8_t g_pcm_buf[PCM_FRAME_SIZE];
 
 /* ------------------------------------------------------------------ */
+/* Private: VAD (Voice Activity Detection)                             */
+/* ------------------------------------------------------------------ */
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+/* VAD state */
+static int g_vad_silence_frames = 0;    /* Consecutive silent frames */
+static int g_vad_speech_frames = 0;     /* Total speech frames in this recording */
+
+/* VAD configuration from Kconfig */
+#define VAD_FRAME_MS            60      /* Each frame is 60ms */
+#define VAD_SILENCE_FRAMES      (CONFIG_VAD_SILENCE_TIMEOUT_MS / VAD_FRAME_MS)
+#define VAD_RMS_THRESHOLD       CONFIG_VAD_RMS_THRESHOLD
+#define VAD_MIN_SPEECH_FRAMES   (CONFIG_VAD_MIN_SPEECH_MS / VAD_FRAME_MS)
+
+/* VAD control: only enable when wake word triggered */
+static bool g_vad_enabled = false;
+
+static void vad_reset(void)
+{
+    g_vad_silence_frames = 0;
+    g_vad_speech_frames = 0;
+    g_vad_enabled = true;
+    ESP_LOGI(TAG, "VAD reset, silence_threshold=%d frames, rms_threshold=%d, min_speech=%d frames",
+             VAD_SILENCE_FRAMES, VAD_RMS_THRESHOLD, VAD_MIN_SPEECH_FRAMES);
+}
+
+static void vad_disable(void)
+{
+    g_vad_enabled = false;
+}
+
+/**
+ * Process VAD on a frame
+ * @param rms RMS value of the audio frame
+ * @return true if recording should stop (silence timeout)
+ */
+static bool vad_process_frame(int rms)
+{
+    if (!g_vad_enabled) {
+        return false;
+    }
+
+    /* Skip VAD if silence timeout is disabled (0) */
+    if (VAD_SILENCE_FRAMES <= 0) {
+        return false;
+    }
+
+    if (rms < VAD_RMS_THRESHOLD) {
+        /* Silent frame */
+        g_vad_silence_frames++;
+
+        /* Log every 10 silent frames */
+        if (g_vad_silence_frames % 10 == 0) {
+            ESP_LOGI(TAG, "VAD: silence_frames=%d/%d, rms=%d (threshold=%d)",
+                     g_vad_silence_frames, VAD_SILENCE_FRAMES, rms, VAD_RMS_THRESHOLD);
+        }
+
+        /* Check if silence timeout reached and minimum speech achieved */
+        if (g_vad_silence_frames >= VAD_SILENCE_FRAMES &&
+            g_vad_speech_frames >= VAD_MIN_SPEECH_FRAMES) {
+            ESP_LOGI(TAG, "VAD: Silence timeout detected! speech_frames=%d, silence_frames=%d",
+                     g_vad_speech_frames, g_vad_silence_frames);
+            return true;  /* Signal to stop recording */
+        }
+    } else {
+        /* Speech frame */
+        g_vad_silence_frames = 0;  /* Reset silence counter */
+        g_vad_speech_frames++;
+
+        /* Log every 20 speech frames */
+        if (g_vad_speech_frames % 20 == 0) {
+            ESP_LOGI(TAG, "VAD: speech_frames=%d, rms=%d", g_vad_speech_frames, rms);
+        }
+    }
+
+    return false;
+}
+#endif /* CONFIG_ENABLE_WAKE_WORD */
+
+/* ------------------------------------------------------------------ */
 /* Public: Initialize                                                 */
 /* ------------------------------------------------------------------ */
 
@@ -105,6 +185,16 @@ static int start_recording(void)
         g_stats.error_count++;
         return -1;
     }
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Initialize VAD for wake word mode */
+    if (g_recording_triggered_by_wake_word) {
+        vad_reset();
+        ESP_LOGI(TAG, "VAD enabled: silence_timeout=%dms, rms_threshold=%d, min_speech=%dms",
+                 CONFIG_VAD_SILENCE_TIMEOUT_MS, CONFIG_VAD_RMS_THRESHOLD, CONFIG_VAD_MIN_SPEECH_MS);
+    }
+#endif
+
     g_state = VOICE_STATE_RECORDING;
     ESP_LOGI(TAG, "start_recording: state -> RECORDING");
     return 0;
@@ -131,6 +221,11 @@ static int stop_recording(void)
         g_stats.error_count++;
         /* Still transition to idle */
     }
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Disable VAD when stopping */
+    vad_disable();
+#endif
 
     g_state = VOICE_STATE_IDLE;
     g_stats.record_count++;
@@ -242,6 +337,17 @@ int voice_recorder_tick(void)
         ESP_LOGI(TAG, "Audio: frame#%d, rms=%d, peak=%d, zeros=%d/%d",
                  g_stats.encode_count + 1, rms, peak, zero_count, sample_count);
     }
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* VAD: Check for silence timeout (only in wake word mode) */
+    if (g_vad_enabled && vad_process_frame(rms)) {
+        ESP_LOGI(TAG, "VAD triggered stop - silence timeout");
+        /* Stop recording due to silence timeout */
+        voice_recorder_process_event(VOICE_EVENT_TIMEOUT);
+        display_update("Processing...", "thinking", 0, NULL);
+        return 0;  /* Recording stopped, don't send this frame */
+    }
+#endif
 
     /* Send PCM directly via WebSocket (no encoding) */
     if (ws_send_audio(g_pcm_buf, pcm_len) != 0) {
