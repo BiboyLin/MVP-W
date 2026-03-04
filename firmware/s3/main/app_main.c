@@ -11,6 +11,7 @@
 #include "display_ui.h"
 #include "wifi_client.h"
 #include "ws_client.h"
+#include "discovery_client.h"
 #include "hal_uart.h"
 #include "hal_audio.h"
 #include "hal_display.h"
@@ -183,19 +184,40 @@ void app_main(void)
         ESP_LOGI(TAG, "WiFi connected");
     }
 
-    /* 5. Initialize WebSocket client */
+    /* 5. Service discovery - find WebSocket server via UDP broadcast */
+    display_update("Finding Server...", "normal", 0, NULL);
+    discovery_init();
+
+    server_info_t server_info = {0};
+    if (discovery_start(&server_info) == 0) {
+        ESP_LOGI(TAG, "Server discovered: %s:%u", server_info.ip, server_info.port);
+        display_update("Server Found", "happy", 0, NULL);
+
+        /* Set WebSocket URL from discovery result */
+        char *ws_url = discovery_get_ws_url(&server_info);
+        if (ws_url) {
+            ws_client_set_server_url(ws_url);
+            free(ws_url);
+        }
+    } else {
+        ESP_LOGW(TAG, "Server discovery failed, using default URL");
+        display_update("Using Default", "normal", 0, NULL);
+        /* Will use default hardcoded URL */
+    }
+
+    /* 6. Initialize WebSocket client */
     ws_client_init();
 
-    /* 6. Register message router handlers */
+    /* 7. Register message router handlers */
     ws_router_t router = ws_handlers_get_router();
     ws_router_init(&router);
     ESP_LOGI(TAG, "WS router handlers registered");
 
-    /* 7. Start WebSocket connection */
+    /* 8. Start WebSocket connection */
     display_update("Connecting Cloud...", "normal", 0, NULL);
     ws_client_start();
 
-    /* 8. Ready */
+    /* 9. Ready */
     ESP_LOGI(TAG, "Ready");
     display_update("Ready", "happy", 0, NULL);
 

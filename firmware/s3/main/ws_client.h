@@ -14,6 +14,19 @@
 int ws_client_init(void);
 
 /**
+ * Set server URL (before ws_client_start)
+ * @param url WebSocket URL (e.g., "ws://192.168.1.100:8765")
+ * @return 0 on success, -1 on error
+ */
+int ws_client_set_server_url(const char *url);
+
+/**
+ * Get current server URL
+ * @return Server URL string (static buffer, do not free)
+ */
+const char* ws_client_get_server_url(void);
+
+/**
  * Start WebSocket connection
  */
 int ws_client_start(void);

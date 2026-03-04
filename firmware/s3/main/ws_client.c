@@ -18,13 +18,15 @@
 
 #define TAG "WS_CLIENT"
 
-/* WebSocket configuration (MVP: hardcoded) */
-#define WS_SERVER_URL  "ws://192.168.31.10:8765"
+/* WebSocket configuration */
+#define WS_DEFAULT_URL  "ws://192.168.31.10:8765"  /* Fallback if discovery fails */
 #define WS_TIMEOUT_MS  10000
+#define WS_URL_MAX_LEN 128
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
 static bool tts_playing = false;  /* TTS playback state */
+static char ws_server_url[WS_URL_MAX_LEN] = WS_DEFAULT_URL;  /* Dynamic server URL */
 
 /* ------------------------------------------------------------------ */
 /* WebSocket Event Handler                                            */
@@ -99,7 +101,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
 int ws_client_init(void)
 {
     esp_websocket_client_config_t cfg = {
-        .uri = WS_SERVER_URL,
+        .uri = ws_server_url,
         .network_timeout_ms = WS_TIMEOUT_MS,
         .buffer_size = 16384,  /* Increased for audio streaming (16KB) */
         .task_stack = 16384,   /* Increased stack size (16KB) */
@@ -113,8 +115,36 @@ int ws_client_init(void)
 
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, ws_event_handler, NULL);
 
-    ESP_LOGI(TAG, "WebSocket client initialized (URL: %s)", WS_SERVER_URL);
+    ESP_LOGI(TAG, "WebSocket client initialized (URL: %s)", ws_server_url);
     return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Set/Get Server URL                                         */
+/* ------------------------------------------------------------------ */
+
+int ws_client_set_server_url(const char *url)
+{
+    if (!url || strlen(url) >= WS_URL_MAX_LEN) {
+        ESP_LOGE(TAG, "Invalid URL or URL too long");
+        return -1;
+    }
+
+    /* Can only set URL before client is initialized */
+    if (ws_client != NULL) {
+        ESP_LOGW(TAG, "Cannot set URL after client initialized");
+        return -1;
+    }
+
+    strncpy(ws_server_url, url, WS_URL_MAX_LEN - 1);
+    ws_server_url[WS_URL_MAX_LEN - 1] = '\0';
+    ESP_LOGI(TAG, "Server URL set to: %s", ws_server_url);
+    return 0;
+}
+
+const char* ws_client_get_server_url(void)
+{
+    return ws_server_url;
 }
 
 /* ------------------------------------------------------------------ */
