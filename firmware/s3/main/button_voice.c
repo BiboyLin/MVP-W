@@ -288,6 +288,9 @@ int voice_recorder_tick(void)
     /* Feed wake word detector when idle (local detection, no network) */
     if (g_state == VOICE_STATE_IDLE && g_wake_word_ctx != NULL) {
         hal_wake_word_feed(g_wake_word_ctx, samples, num_samples);
+        /* Yield after feed so higher-priority detection task can call fetch()
+         * before we loop back. Prevents AFE FEED ring buffer overflow. */
+        taskYIELD();
     }
 
     /* Only send to WebSocket when recording */

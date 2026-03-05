@@ -36,7 +36,7 @@
 #define MAX_WAKE_WORDS         16
 #define MAX_WAKE_WORD_LEN      32
 #define DETECTION_TASK_STACK   4096
-#define DETECTION_TASK_PRIO    3
+#define DETECTION_TASK_PRIO    6
 #define INPUT_BUFFER_CAPACITY  2048  /* samples */
 
 /* ------------------------------------------------------------------ */
