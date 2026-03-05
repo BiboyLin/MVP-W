@@ -95,6 +95,11 @@ static void detection_task(void *arg)
             continue;
         }
 
+        /* Wait for notification from voice_recorder_task that new data is available
+         * This ensures we only fetch() after data has been fed, preventing ringbuffer empty warnings.
+         * Using Task Notification (45% faster than semaphore, less RAM). */
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
         /* Fetch detection result */
         afe_fetch_result_t *res = ctx->afe_iface->fetch(ctx->afe_data);
 
@@ -373,6 +378,13 @@ void hal_wake_word_feed(wake_word_ctx_t *ctx, const int16_t *samples, size_t num
         while (ctx->input_buffer_size >= chunk_size) {
             ctx->afe_iface->feed(ctx->afe_data, ctx->input_buffer);
 
+            /* Notify detection_task that new data has been fed
+             * This ensures fetch() is called only after feed(), preventing ringbuffer empty/full issues.
+             * Using Task Notification (45% faster than semaphore). */
+            if (ctx->detection_task != NULL) {
+                xTaskNotifyGive(ctx->detection_task);
+            }
+
             /* Shift remaining samples to front */
             size_t remaining = ctx->input_buffer_size - chunk_size;
             if (remaining > 0) {
@@ -395,10 +407,8 @@ void hal_wake_word_start(wake_word_ctx_t *ctx)
 
     xEventGroupSetBits(ctx->event_group, DETECTION_RUNNING_BIT);
 
-    /* Delay to allow voice_recorder_task to feed first audio frame before detection_task starts fetching.
-     * Without this delay, detection_task may fetch() before any data is fed, causing AFE ringbuffer empty warnings.
-     * 100ms delay = ~3 audio frames (at 60ms tick interval), which is enough to prime the buffer. */
-    vTaskDelay(pdMS_TO_TICKS(100));
+    /* Note: Task Notification sync in detection_task ensures fetch() is only called after feed().
+     * No artificial delay needed - the synchronization happens automatically. */
 
     ESP_LOGI(TAG, "Wake word detection started");
 }
