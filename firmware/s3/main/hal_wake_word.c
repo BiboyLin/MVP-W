@@ -123,6 +123,8 @@ static void detection_task(void *arg)
                 ESP_LOGW(TAG, "Wake word detected but index out of range: %d", model_index);
             }
         }
+        /* Yield to allow IDLE task to run and reset watchdog */
+        taskYIELD();
     }
 
     ESP_LOGW(TAG, "Detection task exiting (unexpected)");

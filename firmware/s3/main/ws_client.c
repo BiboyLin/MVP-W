@@ -19,13 +19,16 @@
 #define TAG "WS_CLIENT"
 
 /* WebSocket configuration */
-#define WS_DEFAULT_URL  "ws://192.168.31.10:8765"  /* Fallback if discovery fails */
+#define WS_DEFAULT_URL  "ws://[IP_ADDRESS]"  /* Fallback if discovery fails */
 #define WS_TIMEOUT_MS  10000
 #define WS_URL_MAX_LEN 128
+#define RESPONSE_TIMEOUT_MS  10000  /* 10 seconds timeout for server response */
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
 static bool tts_playing = false;  /* TTS playback state */
+static bool waiting_for_response = false;  /* Waiting for server response after audio sent */
+static int64_t response_wait_start_time = 0;  /* Timestamp when response wait started */
 static char ws_server_url[WS_URL_MAX_LEN] = WS_DEFAULT_URL;  /* Dynamic server URL */
 
 /* ------------------------------------------------------------------ */
@@ -240,6 +243,11 @@ int ws_send_audio(const uint8_t *data, int len)
 
 int ws_send_audio_end(void)
 {
+    /* Start response timeout timer */
+    waiting_for_response = true;
+    response_wait_start_time = esp_timer_get_time();
+    ESP_LOGI(TAG, "Audio end sent, waiting for response (timeout %dms)", RESPONSE_TIMEOUT_MS);
+
     /* Send audio end marker (v2.0 protocol: "over") */
     return ws_client_send_text("over");
 }
@@ -288,6 +296,9 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
  */
 void ws_tts_complete(void)
 {
+    /* Clear response wait flag regardless of tts_playing state */
+    waiting_for_response = false;
+
     if (tts_playing) {
         ESP_LOGI(TAG, "TTS playback complete");
 
@@ -298,17 +309,16 @@ void ws_tts_complete(void)
         /* Restore 16kHz for recording */
         hal_audio_set_sample_rate(16000);
 
-#ifdef CONFIG_ENABLE_WAKE_WORD
-        /* In wake word mode, restart audio for continuous wake word detection */
-        ESP_LOGI(TAG, "Restarting audio for wake word detection");
-        hal_audio_start();
-        /* Resume wake word detection (was stopped when wake word detected) */
-        voice_recorder_resume_wake_word();
-#endif
-
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
     }
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Always resume wake word detection after tts_end, regardless of TTS playback state */
+    ESP_LOGI(TAG, "TTS complete, resuming wake word detection");
+    hal_audio_start();
+    voice_recorder_resume_wake_word();
+#endif
 }
 
 /**
@@ -321,8 +331,18 @@ void ws_tts_complete(void)
  */
 void ws_tts_timeout_check(void)
 {
-    /* In v2.0, tts_end message should be received from server.
-     * This function is kept for backward compatibility but does nothing.
-     * TTS completion is now triggered by on_tts_end_handler(). */
-    (void)tts_playing;  /* Suppress unused warning */
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Check if we've been waiting too long for a response */
+    if (waiting_for_response) {
+        int64_t elapsed_ms = (esp_timer_get_time() - response_wait_start_time) / 1000;
+        if (elapsed_ms > RESPONSE_TIMEOUT_MS) {
+            ESP_LOGW(TAG, "Response timeout (%lld ms), resuming wake word detection", elapsed_ms);
+            waiting_for_response = false;
+
+            /* Resume wake word detection */
+            voice_recorder_resume_wake_word();
+            display_update("Timeout", "sad", 0, NULL);
+        }
+    }
+#endif
 }

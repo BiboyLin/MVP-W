@@ -153,8 +153,13 @@ void on_asr_result_handler(const ws_asr_result_cmd_t *cmd)
 
     ESP_LOGI(TAG, "ASR result: %s", cmd->text);
 
-    /* Display recognized text with analyzing animation */
-    display_update(cmd->text, "analyzing", 0, NULL);
+    /* Handle empty ASR result - show placeholder text */
+    if (cmd->text[0] == 0) {
+        display_update("Listening...", "listening", 0, NULL);
+    } else {
+        /* Display recognized text with analyzing animation */
+        display_update(cmd->text, "analyzing", 0, NULL);
+    }
 }
 
 /* ------------------------------------------------------------------ */

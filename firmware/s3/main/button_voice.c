@@ -187,6 +187,13 @@ static int start_recording(void)
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
+    /* Stop wake word detection during recording to prevent AFE empty warnings */
+    if (g_wake_word_ctx != NULL) {
+        hal_wake_word_stop(g_wake_word_ctx);
+        /* Wait for detection task to finish current fetch */
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    
     /* Initialize VAD for wake word mode */
     if (g_recording_triggered_by_wake_word) {
         vad_reset();
@@ -466,6 +473,8 @@ static void wake_word_cleanup(void)
 {
     if (g_wake_word_ctx != NULL) {
         hal_wake_word_stop(g_wake_word_ctx);
+        /* Wait for detection task to finish current fetch */
+        vTaskDelay(pdMS_TO_TICKS(50));
         hal_wake_word_deinit(g_wake_word_ctx);
         g_wake_word_ctx = NULL;
     }
@@ -482,6 +491,13 @@ int voice_recorder_start(void)
     /* Initialize wake word detector */
     if (wake_word_setup() != 0) {
         ESP_LOGW(TAG, "Wake word setup failed, continuing without wake word");
+    }
+    
+    /* Start audio for wake word detection - must be running to feed AFE */
+    ESP_LOGI(TAG, "Starting audio for wake word detection");
+    if (hal_audio_start() != 0) {
+        ESP_LOGE(TAG, "Audio start failed");
+        return -1;
     }
 #endif
 
