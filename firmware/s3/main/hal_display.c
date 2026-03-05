@@ -42,7 +42,7 @@ static emoji_anim_type_t map_emoji_type(int ui_emoji_id)
         case 0:  /* EMOJI_STANDBY */   return EMOJI_ANIM_STANDBY;    /* standby */
         case 1:  /* EMOJI_HAPPY */     return EMOJI_ANIM_GREETING;   /* greeting */
         case 2:  /* EMOJI_SAD */       return EMOJI_ANIM_DETECTED;   /* detected */
-        case 3:  /* EMOJI_SURPRISED */ return EMOJI_ANIM_DETECTING;  /* detecting */
+        case 3:  /* EMOJI_SURPRISED */ return EMOJI_ANIM_STANDBY;    /* standby (detecting removed) */
         case 4:  /* EMOJI_ANGRY */     return EMOJI_ANIM_ANALYZING;  /* analyzing */
         case 5:  /* EMOJI_LISTENING */ return EMOJI_ANIM_LISTENING;  /* listening */
         case 6:  /* EMOJI_ANALYZING */ return EMOJI_ANIM_ANALYZING;  /* analyzing */
