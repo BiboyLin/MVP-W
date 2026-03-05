@@ -61,6 +61,9 @@ int hal_audio_init(void)
     return 0;
 }
 
+/* Track audio mode: recording (input) or playback (output) */
+static bool is_playback_mode = false;
+
 /* Set sample rate for playback (call before TTS playback) */
 void hal_audio_set_sample_rate(uint32_t sample_rate)
 {
@@ -72,27 +75,32 @@ void hal_audio_set_sample_rate(uint32_t sample_rate)
         return;  /* No change needed */
     }
 
-    ESP_LOGI(TAG, "Switching sample rate: %lu -> %lu", current_sample_rate, sample_rate);
+    ESP_LOGI(TAG, "Switching sample rate: %lu -> %lu (playback_mode=%d)",
+             current_sample_rate, sample_rate, is_playback_mode);
 
-    /* Remember if audio was running before switch */
-    bool was_running = is_running;
+    /* For playback mode, we don't need to stop input channel (which may not be enabled).
+     * Just set the new sample rate directly. */
+    if (is_playback_mode) {
+        /* Set new sample rate (16-bit, mono channel) */
+        bsp_codec_set_fs(sample_rate, 16, 1);
+        current_sample_rate = sample_rate;
+        ESP_LOGI(TAG, "Sample rate switch complete (playback mode, no stop needed)");
+        return;
+    }
 
-    /* Stop codec first to flush DMA buffers and avoid glitch noise */
-    bsp_codec_dev_stop();
-
-    /* Small delay to ensure DMA is fully flushed */
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    /* Set new sample rate (16-bit, mono channel) */
+    /* For recording mode (input only), we need to reconfigure I2S.
+     * Use bsp_codec_set_fs which handles I2S reconfiguration properly. */
     bsp_codec_set_fs(sample_rate, 16, 1);
     current_sample_rate = sample_rate;
 
-    /* Restart audio stream if it was running before */
-    if (was_running) {
-        bsp_codec_dev_resume();
-    }
-
     ESP_LOGI(TAG, "Sample rate switch complete");
+}
+
+/* Mark audio as being used for playback (not just recording) */
+void hal_audio_set_playback_mode(bool enable)
+{
+    is_playback_mode = enable;
+    ESP_LOGI(TAG, "Audio mode: %s", enable ? "playback" : "recording");
 }
 
 int hal_audio_start(void)

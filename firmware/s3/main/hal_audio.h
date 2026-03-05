@@ -2,6 +2,7 @@
 #define HAL_AUDIO_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 /**
  * Initialize audio codec (call once at startup)
@@ -40,5 +41,11 @@ int hal_audio_stop(void);
  * @param sample_rate Sample rate in Hz (e.g., 16000, 24000)
  */
 void hal_audio_set_sample_rate(uint32_t sample_rate);
+
+/**
+ * Mark audio as being used for playback (not just recording)
+ * @param enable true for TTS playback mode, false for recording mode
+ */
+void hal_audio_set_playback_mode(bool enable);
 
 #endif /* HAL_AUDIO_H */

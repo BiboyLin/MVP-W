@@ -282,6 +282,9 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
         voice_recorder_pause_wake_word();
 #endif
 
+        /* Mark as playback mode to skip unnecessary I2S stop in sample rate switch */
+        hal_audio_set_playback_mode(true);
+
         /* Switch to 24kHz for TTS playback (火山引擎 TTS) */
         hal_audio_set_sample_rate(24000);
         hal_audio_start();
@@ -317,6 +320,9 @@ void ws_tts_complete(void)
 
         display_update(NULL, "happy", 0, NULL);
         tts_playing = false;
+
+        /* Restore recording mode for wake word detection */
+        hal_audio_set_playback_mode(false);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
