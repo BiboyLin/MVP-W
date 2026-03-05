@@ -394,6 +394,12 @@ void hal_wake_word_start(wake_word_ctx_t *ctx)
     }
 
     xEventGroupSetBits(ctx->event_group, DETECTION_RUNNING_BIT);
+
+    /* Delay to allow voice_recorder_task to feed first audio frame before detection_task starts fetching.
+     * Without this delay, detection_task may fetch() before any data is fed, causing AFE ringbuffer empty warnings.
+     * 100ms delay = ~3 audio frames (at 60ms tick interval), which is enough to prime the buffer. */
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     ESP_LOGI(TAG, "Wake word detection started");
 }
 

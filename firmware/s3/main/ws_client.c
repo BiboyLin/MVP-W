@@ -22,7 +22,7 @@
 #define WS_DEFAULT_URL  "ws://[IP_ADDRESS]"  /* Fallback if discovery fails */
 #define WS_TIMEOUT_MS  10000
 #define WS_URL_MAX_LEN 128
-#define RESPONSE_TIMEOUT_MS  10000  /* 10 seconds timeout for server response */
+#define RESPONSE_TIMEOUT_MS  30000  /* 30 seconds timeout for server response */
 
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
@@ -275,7 +275,13 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
     /* Only update display and start audio on first chunk */
     if (!tts_playing) {
         ESP_LOGI(TAG, "TTS started, first chunk: %d bytes", len);
-        display_update(NULL, "speaking", 0, NULL);
+        display_update("", "speaking", 0, NULL);
+
+#ifdef CONFIG_ENABLE_WAKE_WORD
+        /* Pause wake word detection before TTS to avoid I2S conflicts */
+        voice_recorder_pause_wake_word();
+#endif
+
         /* Switch to 24kHz for TTS playback (火山引擎 TTS) */
         hal_audio_set_sample_rate(24000);
         hal_audio_start();

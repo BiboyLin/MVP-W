@@ -78,6 +78,12 @@ void voice_recorder_stop(void);
  */
 void voice_recorder_resume_wake_word(void);
 
+/**
+ * Pause wake word detection before TTS playback
+ * Called when TTS starts to prevent I2S conflicts between wake word (in) and TTS (out)
+ */
+void voice_recorder_pause_wake_word(void);
+
 /* ------------------------------------------------------------------ */
 /* HAL Interface (to be implemented by hardware/audio layer)          */
 /* ------------------------------------------------------------------ */

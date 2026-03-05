@@ -1,466 +1,225 @@
-# CLAUDE.md - MVP-W
+# 语音信息流 (完整架构)
 
-# 角色设定
-你是一个顶级的嵌入式 C 语言专家和坚定的 TDD（测试驱动开发）原教旨主义者。当前我们正在开发 MVP-W 项目的嵌入式固件部分（包含 ESP32-S3 和 ESP32 两个子工程），基于 ESP-IDF v5.2+ 框架。云端 Python 代码由其他团队负责，我们只关注设备端逻辑。
-
-# 核心开发哲学：软硬解耦
-嵌入式 TDD 的最大痛点是硬件依赖。为了实现不间断的自动化测试，你必须严格遵守"硬件抽象层 (HAL)"原则：
-1. **禁止在业务逻辑中直接调用 ESP-IDF 的硬件驱动 API**（如 `uart_write_bytes`, `i2s_channel_read` 等）。
-2. 所有的硬件操作必须封装成接口（例如 `hal_uart_send()`, `hal_audio_read()`）。
-3. 在编写业务逻辑（如 JSON 解析、协议转换、队列管理）时，完全依赖这些抽象接口。
-
-# TDD 纪律 (红 - 绿 - 重构)
-1. **编写测试（红）**：在 `test/` 目录下使用 Unity 框架编写测试用例。在这个阶段，你必须 Mock（模拟）掉所有的 HAL 层接口和 FreeRTOS 依赖。
-2. **宿主机运行测试**：必须配置 CMake 使测试能够在 Host（Linux/macOS/Windows）环境下编译运行，而不是烧录到真实的 ESP32 上。
-   - 运行命令：`idf.py --preview set-target linux && idf.py build && ./build/MVP-W_test`（根据实际配置调整宿主机编译命令）。
-3. **实现功能（绿）**：用最简洁的 C 代码使测试通过。
-4. **验证与修复**：如果测试失败，自主阅读报错信息并修复，连续重试不超过 5 次。如果发生段错误 (Segfault) 或内存泄漏，立即停止并检查指针和内存分配（使用 cJSON 时极其容易发生）。
-5. **重构**：消除魔术数字，优化内存占用，确保符合 MISRA C 基础规范。
-
-# 约束与红线
-- **不要修改 PRD 中定义好的任何协议结构**
-- **所有的动态内存分配 (`malloc`, `cJSON_Parse`) 必须有对应的释放逻辑**，并在 Unity 测试中通过自定义的内存分配器跟踪内存泄漏
-- **遇到无法在 Host 端 Mock 的底层强耦合逻辑时，立即停止执行并向我询问，严禁强行硬编码**
-- **安全红线**：
-  - MVP 阶段 WiFi 凭证允许硬编码（`wifi_config.h`），但 API Keys 严禁硬编码
-  - MVP 阶段使用明文 WebSocket (ws://)，生产版本必须升级为 WSS
-  - 生产版本严禁硬编码 WiFi 密码（改用 NVS 存储）
-  - 设备离线时需实现 Device Shadow（设备影子）同步状态
-  - 必须实现 Last Will and Testament (LWT) 检测意外断连
-  - 考虑低功耗场景时使用 Deep Sleep 循环
-
----
-
-# 项目概述
-
-MVP-W (Minimum Viable Product - Watcher) 是一个边缘设备 + 云端大脑的最小可行版本。
+## 整体架构
 
 ```
-┌─────────────────────┐      ┌─────────────────────┐
-│      Watcher        │      │    Cloud (PC)      │
-│   (ESP32-S3)        │◄────►│    (WebSocket)     │
-├─────────────────────┤      ├─────────────────────┤
-│ - 音视频采集        │      │ - ASR 语音识别      │
-│ - 屏幕显示/表情     │      │ - LLM 分析          │
-│ - 按键语音触发      │      │ - TTS 语音合成      │
-│ - WiFi/WebSocket    │      │ - Agent 意图理解    │
-│ - UART → MCU        │      └─────────────────────┘
-└─────────┬───────────┘
-          │ UART 115200
-          ▼
-┌─────────────────────┐
-│  MCU (身体)         │
-│  (ESP32 舵机控制)   │
-├─────────────────────┤
-│ - 舵机 X/Y 轴      │
-│ - LED 状态指示      │
-└─────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         语音信息流架构图                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────────────┐   │
+│  │   麦克风     │     │   I2S HAL    │     │   唤醒词检测 AFE     │   │
+│  │  (I2S DMIC) │────►│ hal_audio.c  │────►│   hal_wake_word.c   │   │
+│  └──────────────┘     └──────┬───────┘     └──────────┬───────────┘   │
+│                               │                         │               │
+│                               │ PCM 16kHz               │ 检测结果      │
+│                               ▼                         ▼               │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    button_voice.c 状态机                        │   │
+│  │  ┌─────────────┐    ┌─────────────────┐    ┌───────────────┐  │   │
+│  │  │ VOICE_STATE │───►│ VOICE_STATE     │───►│ VOICE_STATE   │  │   │
+│  │  │ _IDLE      │    │ _RECORDING      │    │ _IDLE         │  │   │
+│  │  └─────────────┘    └────────┬────────┘    └───────────────┘  │   │
+│  │         ▲                     │                                   │   │
+│  │         │                     │ PCM 直传 WebSocket              │   │
+│  │         │                     ▼                                   │   │
+│  │         │            ┌─────────────────────┐                    │   │
+│  │         │            │ ws_send_audio()     │                    │   │
+│  │         │            │ ws_send_audio_end() │                    │   │
+│  │         │            └──────────┬──────────┘                    │   │
+│  └─────────┴──────────────────────┴───────────────────────────────┘   │
+│                                    │                                   │
+│                                    ▼ WebSocket                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                         Cloud (PC)                               │   │
+│  │  ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌──────────────┐  │   │
+│  │  │   ASR  │──►│   LLM   │──►│  Agent  │──►│     TTS      │  │   │
+│  │  │(Whisper)│   │(Claude) │   │         │   │(火山引擎 24k)│  │   │
+│  │  └─────────┘   └─────────┘   └─────────┘   └───────┬────────┘  │   │
+│  │                                                    │            │   │
+│  │                                                    │ PCM 24kHz  │   │
+│  └────────────────────────────────────────────────────┴────────────┘   │
+│                                    │                                   │
+│                                    ▼ WebSocket 二进制                  │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                    ws_client.c TTS 处理                          │   │
+│  │  ┌─────────────────┐    ┌─────────────────┐                    │   │
+│  │  │ ws_handle_tts() │──►│ hal_audio_write()│──►│ I2S 喇叭    │   │
+│  │  │ (二进制帧处理)   │    │ (24kHz 直传)    │    │             │   │
+│  │  └─────────────────┘    └─────────────────┘                    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 功能边界
+## 语音触发流程
 
-| 功能 | 位置 | 说明 |
-|------|------|------|
-| **语音采集** | Watcher | I2S 麦克风 → Opus 编码 → WebSocket |
-| **语音播放** | Watcher | WebSocket ← Opus 解码 → I2S 喇叭 |
-| **视频采集** | Watcher | Himax 摄像头 → JPEG → WebSocket |
-| **屏幕显示** | Watcher | LVGL UI + 表情显示 |
-| **按键触发** | Watcher | 长按开始/结束语音输入 |
-| **WiFi/通信** | Watcher | WiFi 连接 + WebSocket 客户端 |
-| **运动控制** | MCU | GPIO PWM → 舵机云台 |
-| **LLM/Agent** | Cloud | Claude API / 本地 LLM |
-| **ASR/STT** | Cloud | 语音转文字 |
-| **TTS** | Cloud | 文字转语音 |
-
-## 项目结构
-
-```
-MVP-W/
-├── PRD.md                   # 项目需求文档
-├── CLAUDE.md                # 本文件
-├── docs/
-│   └── COMMUNICATION_PROTOCOL.md  # 通信协议详细文档
-├── firmware/
-│   ├── s3/                  # ESP32-S3 固件 (主控)
-│   │   ├── CMakeLists.txt
-│   │   ├── sdkconfig.defaults     # 构建配置 (关键！需与 factory_firmware 同步)
-│   │   ├── spiffs/                # PNG 动画资源 (24 帧)
-│   │   └── main/
-│   │       ├── app_main.c           # 入口 + 系统初始化
-│   │       ├── ws_client.c/.h       # WebSocket 客户端 + TTS 二进制帧处理
-│   │       ├── ws_router.c/.h       # 消息路由框架
-│   │       ├── ws_handlers.c/.h     # 消息处理器实现
-│   │       ├── button_voice.c       # 按键语音触发状态机
-│   │       ├── display_ui.c         # LVGL 屏幕显示 + 表情动画
-│   │       ├── hal_audio.c/.h       # 音频 HAL (I2S)
-│   │       ├── hal_display.c/.h     # 显示 HAL (LVGL)
-│   │       ├── hal_opus.c/.h        # Opus 编解码 HAL (待实现)
-│   │       ├── hal_uart.c/.h        # UART HAL
-│   │       ├── uart_bridge.c        # UART 转发到 MCU
-│   │       ├── emoji_png.c          # SPIFFS PNG 加载
-│   │       ├── emoji_anim.c         # 动画定时器系统
-│   │       └── camera_capture.c     # Himax 拍照 (待实现)
-│   ├── mcu/                 # ESP32-MCU 固件 (身体)
-│   │   ├── CMakeLists.txt
-│   │   └── main/
-│   │       ├── main.c                 # 入口 + 核心逻辑
-│   │       ├── uart_handler.c         # UART 指令处理
-│   │       └── servo_control.c        # 舵机控制
-│   └── test_host/           # Host 端单元测试 (Unity 框架)
-│       ├── CMakeLists.txt
-│       ├── test_ws_router.c
-│       ├── test_ws_handlers.c
-│       ├── test_uart_bridge.c
-│       ├── test_button_voice.c
-│       ├── test_display_ui.c
-│       └── mock_dependencies.h/.c
-└── server/                  # PC 云端 (其他团队负责)
-    ├── websocket_server.py  # WebSocket 服务
-    └── ai/
-        ├── agent.py         # AI 逻辑
-        ├── asr.py           # 语音识别
-        └── tts.py           # 语音合成
-```
-
----
-
-# 硬件架构
-
-## Watcher GPIO 分配 (ESP32-S3)
-
-> **参考**: `Watcher-Firmware/examples/helloworld/local_components/sensecap-watcher/include/sensecap-watcher.h`
-
-| GPIO | 功能 | 说明 |
-|------|------|------|
-| GPIO 10 | I2S MCLK | 音频时钟 |
-| GPIO 11 | I2S BCLK | 位时钟 |
-| GPIO 12 | I2S LRCK | 左右声道 |
-| GPIO 15 | I2S DOUT | 喇叭输出 |
-| GPIO 16 | I2S DIN | 麦克风输入 |
-| GPIO 4,5,6 | LCD SPI | 显示器 (412x412) |
-| GPIO 21 | Himax CS | 摄像头 |
-| GPIO 38,39 | Touch I2C | 触摸屏 |
-| GPIO 41,42 | 旋钮 Encoder | 按钮输入 (语音触发) |
-| GPIO 19 | UART0 TX | → ESP32-MCU RX (烧录时需断开) |
-| GPIO 20 | UART0 RX | ← ESP32-MCU TX (烧录时需断开) |
-
-## MCU GPIO 分配 (ESP32)
-
-> **参考**: `WatcherOld/MCU/main/main.c`
-
-| GPIO | 功能 | 说明 |
-|------|------|------|
-| GPIO 17 | UART TX | 发送响应 → S3 RX |
-| GPIO 16 | UART RX | 接收指令 ← S3 TX |
-| GPIO 12 | 舵机 X 轴 | PWM 输出 (左右 0-180°) |
-| GPIO 13 | 舵机 Y 轴 | PWM 输出 (上下 0-180°) |
-| GPIO 2 | LED | 状态指示灯 |
-
-## UART 通信连接
-
-```
-ESP32-S3 (主控)          ESP32-MCU (身体)
-─────────────────       ─────────────────
-GPIO 19 (TX)  ─────────► GPIO 16 (RX)
-GPIO 20 (RX)  ◄───────── GPIO 17 (TX)
-GND         ───────────► GND
-```
-
-- **波特率**: 115200
-- **数据位**: 8
-- **停止位**: 1
-- **校验位**: None
-
----
-
-# 通信协议
-
-> **详细协议文档**: `docs/COMMUNICATION_PROTOCOL.md`
-
-## WebSocket 消息格式 (Cloud ↔ Watcher)
-
-### 文本消息 (JSON)
-
-所有控制指令和状态消息使用 JSON 文本帧格式。
-
-#### 控制指令 (Cloud → Watcher)
-
-```json
-// 舵机控制
-{
-    "type": "servo",
-    "x": 90,
-    "y": 45
-}
-
-// 文字显示 + 表情 (emoji 和 size 均为可选字段)
-{
-    "type": "display",
-    "text": "你好",
-    "emoji": "happy",   // 可选: happy/sad/surprised/angry/normal
-    "size": 24          // 可选: 字体大小 (默认 24)
-}
-
-// 拍照请求
-{
-    "type": "capture",
-    "quality": 80
-}
-
-// 状态反馈 (AI 思考中/回复中)
-{
-    "type": "status",
-    "state": "thinking",    // 或 "speaking", "idle", "error"
-    "message": "正在思考..."
-}
-
-// 重启指令
-{
-    "type": "reboot"
-}
-```
-
-#### 媒体流 (Watcher → Cloud)
-
-```json
-// 音频结束标记
-{
-    "type": "audio_end"
-}
-
-// 视频流 (JPEG)
-{
-    "type": "video",
-    "format": "jpeg",
-    "width": 412,
-    "height": 412,
-    "data": "<base64 encoded jpeg>"
-}
-
-// 传感器数据
-{
-    "type": "sensor",
-    "co2": 400,
-    "temperature": 25.5,
-    "humidity": 60
-}
-```
-
-### 二进制帧 (Binary Frame)
-
-音频数据（上传和下载）统一使用二进制帧格式，效率更高。
-
-#### AUD1 帧格式
-
-```
-┌──────────────┬──────────────┬─────────────────────┐
-│  Magic (4B)  │ Length (4B)  │   Opus Data (N B)   │
-│   "AUD1"     │  uint32_t LE │   编码音频数据       │
-└──────────────┴──────────────┴─────────────────────┘
-     [0-3]           [4-7]            [8-N]
-```
-
-- **Magic**: 4 字节 ASCII "AUD1"
-- **Length**: 4 字节 uint32_t 小端序，表示 Opus 数据长度
-- **Opus Data**: 实际的 Opus 编码音频数据
-
-#### 用途
-
-| 方向 | 场景 | 帧类型 |
-|------|------|--------|
-| Watcher → Cloud | 语音上传 | AUD1 二进制帧 |
-| Cloud → Watcher | TTS 播放 | AUD1 二进制帧 |
-| Watcher → Cloud | 录音结束 | `{"type":"audio_end"}` JSON 文本 |
-
-## UART 协议 (Watcher → MCU)
-
-```
-舵机指令:
-X:90\r\n
-Y:45\r\n
-
-格式："<axis>:<angle>\r\n"
-- axis: X 或 Y
-- angle: 0-180
-```
-
----
-
-# 软件架构
-
-## Watcher 架构 (ESP32-S3)
-
-```
-firmware/s3/main/
-│
-├── app_main.c              # 入口 + 系统初始化
-│   - wifi_init()
-│   - ws_client_init()
-│   - display_ui_init()
-│   - ws_router_init()
-│
-├── ws_client.c             # WebSocket 客户端
-│   - ws_connect()
-│   - ws_send_audio()       # AUD1 二进制帧上传
-│   - ws_send_audio_end()   # 录音结束标记
-│   - ws_handle_tts_binary() # TTS 二进制帧处理
-│   - ws_tts_complete()     # TTS 播放完成
-│
-├── ws_router.c             # 消息路由框架
-│   - ws_router_init()      # 注册处理器
-│   - ws_route_message()    # JSON 消息分发
-│
-├── ws_handlers.c           # 消息处理器实现
-│   - on_servo_handler()    # 舵机控制
-│   - on_display_handler()  # 屏幕显示
-│   - on_status_handler()   # 状态更新
-│   - on_capture_handler()  # 拍照请求
-│   - ws_state_to_emoji()   # 状态→表情映射
-│
-├── button_voice.c          # 按键语音触发
-│   - voice_recorder_init()
-│   - voice_recorder_process_event()
-│   - voice_recorder_tick()
-│
-├── display_ui.c            # LVGL 屏幕显示
-│   - display_ui_init()
-│   - display_update()      # 文字 + 表情更新
-│
-├── emoji_anim.c            # PNG 动画系统
-│   - emoji_anim_start()    # 启动动画定时器
-│   - emoji_anim_stop()     # 停止动画
-│
-├── emoji_png.c             # SPIFFS PNG 加载
-│   - emoji_png_load()      # 从 SPIFFS 加载 PNG
-│
-├── hal_audio.c             # 音频 HAL (I2S)
-│   - hal_audio_start()     # 启动 I2S
-│   - hal_audio_read()      # 读取麦克风数据
-│   - hal_audio_write()     # 写入喇叭数据
-│   - hal_audio_stop()      # 停止 I2S
-│
-├── hal_opus.c              # Opus 编解码 HAL (待实现)
-│   - hal_opus_encode()     # PCM → Opus
-│   - hal_opus_decode()     # Opus → PCM
-│
-├── hal_display.c           # 显示 HAL (LVGL)
-│   - hal_display_init()
-│   - hal_display_update()
-│
-├── hal_uart.c              # UART HAL
-│   - hal_uart_init()
-│   - hal_uart_send()
-│
-├── uart_bridge.c           # UART 转发到 MCU
-│   - uart_bridge_init()
-│   - uart_bridge_send_servo()
-│
-└── camera_capture.c        # Himax 拍照 (待实现)
-```
-
-## MCU 架构 (ESP32)
-
-```
-firmware/mcu/main/
-│
-├── main.c                  # 入口 + 核心逻辑
-│   - uart_init()
-│   - servo_init()
-│   - main_loop()
-│
-├── uart_handler.c          # UART 指令处理
-│   ├── uart_init()         # UART2 初始化 (GPIO 16 RX / GPIO 17 TX)
-│   └── process_cmd()       # 指令解析; X/Y 缓存后原子执行，避免中间姿态
-│
-└── servo_control.c         # 舵机控制
-    ├── ledc_init()         # LEDC 初始化 (50Hz PWM)
-    ├── set_angle()         # 设置角度
-    ├── smooth_move()       # 平滑移动
-    └── angle_to_duty()     # 角度 → PWM 占空比转换
-```
-
-## 舵机参数
-
-```c
-#define SERVO_FREQ     50       // 50Hz (20ms 周期)
-#define SERVO_RES      13       // 13 位分辨率 (0-8191)
-#define SERVO_MIN_US   500      // 0.5ms = 0°
-#define SERVO_MAX_US   2500     // 2.5ms = 180°
-
-// 角度到 PWM 转换公式
-// 周期 = 1000000µs / 50Hz = 20000µs，13位分辨率 → 8192 counts
-// 0°  : 500µs  → duty ≈ 205
-// 180°: 2500µs → duty = 1024
-uint32_t angle_to_duty(int angle) {
-    if (angle < 0) angle = 0;
-    if (angle > 180) angle = 180;
-    uint32_t pulse_us = SERVO_MIN_US + (angle * (SERVO_MAX_US - SERVO_MIN_US) / 180);
-    return (pulse_us * (1 << SERVO_RES)) / (1000000 / SERVO_FREQ);
-}
-```
-
----
-
-# 语音触发流程
-
-## 唤醒词模式 (推荐)
+### 唤醒词模式 (已实现)
 
 使用乐鑫 ESP-SR 语音识别框架，实现离线唤醒词检测：
 
 ```
-1. 监听麦克风 (VAD 持续检测)
-   └── esp_sr_init() → 启动语音识别
+1. 系统启动 (app_main.c)
+   └── voice_recorder_start()
+       ├── hal_wake_word_init() → 加载 AFE 模型
+       ├── hal_audio_start() → 启动 I2S 麦克风
+       ├── voice_recorder_task 创建 (优先级 5, 60ms 轮询)
+       └── hal_wake_word_start() → 启动检测
 
-2. 检测唤醒词 ("你好小智")
-   └── esp_wn_register_callback() → 回调
+2. voice_recorder_task 轮询 (60ms 间隔)
+   └── hal_audio_read() → PCM 16kHz
+       └── hal_wake_word_feed() → 喂入 AFE
+           └── 检测任务 (优先级 4) 调用 fetch()
 
-3. 唤醒成功 → 本地反馈
-   ├── 舵机微动 (抬头/眨眼)
-   ├── 屏幕显示 "我在听"
-   └── 蜂鸣器短响
+3. 唤醒词检测成功 ("你好小智")
+   └── on_wake_word_detected() 回调
+       ├── display_update("Listening...", "listening")
+       ├── voice_recorder_process_event(VOICE_EVENT_WAKE_WORD)
+       └── 状态切换: IDLE → RECORDING
 
-4. 开始录音 → 云端 ASR
-   └── 后续流程同按键模式
+4. VAD 静音检测 (唤醒词触发后启用)
+   └── vad_process_frame() 计算 RMS
+       └── 静音超时 → voice_recorder_process_event(VOICE_EVENT_TIMEOUT)
+
+5. 录音结束
+   └── ws_send_audio_end() → {"type":"audio_end"}
+   └── 状态切换: RECORDING → IDLE
+   └── hal_wake_word_start() → 恢复唤醒词检测
 ```
 
-## 按键模式 (已实现)
+### 按键模式 (已实现)
 
 ```
-1. 用户长按旋钮按钮
-   └── voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS)
-   └── display_update("Listening...", "listening", ...)
+1. 用户短按旋钮按钮
+   └── button_callback(true)
+       └── voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS)
+           └── start_recording()
+               ├── hal_audio_start() → 确保 I2S 运行
+               ├── hal_wake_word_stop() → 停止唤醒词检测
+               └── display_update("Recording...", "normal")
 
-2. 开始录音
-   └── hal_audio_read() → PCM 数据
-   └── hal_opus_encode() → Opus 数据 (待实现)
-   └── ws_send_audio() → AUD1 二进制帧
+2. voice_recorder_task 轮询 (60ms 间隔)
+   └── hal_audio_read() → PCM 16kHz
+       └── ws_send_audio() → WebSocket 二进制帧
 
 3. 用户松开按钮
-   └── voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE)
-   └── display_update("Ready", "happy", ...)
+   └── button_callback(false)
+       └── voice_recorder_process_event(VOICE_EVENT_BUTTON_RELEASE)
+           └── stop_recording()
+               └── ws_send_audio_end() → {"type":"audio_end"}
+               └── display_update("Processing...", "analyzing")
 
-4. 结束录音 → 发送结束标记
-   └── ws_send_audio_end() → {"type": "audio_end"}
+4. 等待云端响应
+   └── waiting_for_response = true
+   └── 收到 Bot 回复 → TTS 播放
 ```
 
-## TTS 播放流程 (已实现)
+### TTS 播放流程 (已实现)
 
 ```
-1. 云端发送 TTS 音频
-   └── WebSocket 二进制帧 (AUD1 格式)
-   └── [Magic: "AUD1"][Length: N][Opus Data]
+1. 云端发送 TTS 音频 (WebSocket 二进制帧)
+   └── ws_client.c:ws_handle_tts_binary()
+       └── 第一帧:
+           ├── tts_playing = true
+           ├── hal_audio_set_sample_rate(24000) → 切换到 24kHz
+           ├── hal_audio_start()
+           └── display_update("", "speaking")
 
-2. 设备接收并解码
-   └── ws_handle_tts_binary() → 解析帧头
-   └── hal_opus_decode() → PCM 数据 (待实现)
-   └── hal_audio_write() → 播放
+2. 播放 PCM 数据
+   └── hal_audio_write() → I2S DMA → 喇叭
+       └── 持续接收直到 tts_end
 
-3. 云端发送状态更新
-   └── {"type": "status", "state": "idle", ...}
-   └── ws_tts_complete() → 停止音频
+3. TTS 播放完成
+   └── on_tts_end_handler() → ws_tts_complete()
+       ├── hal_audio_stop()
+       ├── hal_audio_set_sample_rate(16000) → 切换回 16kHz
+       ├── display_update(NULL, "happy")
+       └── voice_recorder_resume_wake_word() → 恢复唤醒词检测
 ```
 
----
+## 关键模块说明
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| **音频 HAL** | `hal_audio.c` | I2S 麦克风/喇叭驱动，采样率切换 (16kHz/24kHz) |
+| **唤醒词检测** | `hal_wake_word.c` | ESP-SR AFE 离线唤醒词检测 ("你好小智") |
+| **语音状态机** | `button_voice.c` | 录音状态管理，VAD 静音检测，按键/唤醒词触发 |
+| **WebSocket 客户端** | `ws_client.c` | 音频上传/下载，TTS 二进制帧处理 |
+| **消息路由** | `ws_router.c` | JSON 消息分发到处理器 |
+| **消息处理** | `ws_handlers.c` | 指令处理器 (servo, display, status, tts_end) |
+
+## 音频参数
+
+| 参数 | 录音 (ASR) | 播放 (TTS) |
+|------|------------|------------|
+| 采样率 | 16kHz | 24kHz |
+| 位深 | 16-bit | 16-bit |
+| 声道 | mono | mono |
+| 编码 | Raw PCM (无压缩) | Raw PCM (无压缩) |
+| 帧大小 | 1920 bytes (60ms) | 可变 |
+| 带宽 | ~256kbps | ~384kbps |
+
+## 状态转换图
+
+```
+                         ┌─────────────────────────────────────────┐
+                         │         VOICE_STATE_IDLE                │
+                         │  - 等待唤醒词/按键                       │
+                         │  - AFE 持续监听                          │
+                         │  - voice_recorder_task 轮询             │
+                         └──────────────┬──────────────────────────┘
+                                        │
+          ┌─────────────────────────────┼─────────────────────────────┐
+          │                             │                             │
+          ▼                             ▼                             │
+┌─────────────────────┐     ┌─────────────────────────┐     ┌─────────────────┐
+│  VOICE_EVENT_      │     │   VOICE_EVENT_          │     │   WS 收到       │
+│  WAKE_WORD         │     │   BUTTON_PRESS          │     │   bot_reply     │
+│  (检测到唤醒词)     │     │   (按键触发)            │     │   (TTS 开始)    │
+└─────────┬───────────┘     └────────────┬────────────┘     └────────┬────────┘
+          │                              │                             │
+          │                              ▼                             │
+          │                   ┌─────────────────────────┐              │
+          │                   │  VOICE_STATE_RECORDING │              │
+          │                   │  - 录音中               │              │
+          │                   │  - PCM 发送到 WebSocket │              │
+          │                   │  - AFE 暂停             │              │
+          │                   │  - VAD 启用 (唤醒词模式)│              │
+          │                   └────────────┬────────────┘              │
+          │                              │                             │
+          │     ┌─────────────────────────┼─────────────────────────┐  │
+          │     │                         │                         │  │
+          │     ▼                         ▼                         ▼  │
+          │ ┌───────────────┐   ┌───────────────────┐   ┌────────────┐│
+          │ │ VOICE_EVENT_  │   │ VOICE_EVENT_      │   │ 收到       ││
+          │ │ TIMEOUT       │   │ BUTTON_RELEASE    │   │ tts_end    ││
+          │ │ (VAD 静音超时) │   │ (按键松开)         │   │ 消息       ││
+          │ └───────┬───────┘   └─────────┬─────────┘   └──────┬─────┘│
+          │         │                       │                    │     │
+          └─────────┴───────────────────────┴────────────────────┘     │
+                                        │                                │
+                                        ▼                                │
+                         ┌─────────────────────────────────────────┐      │
+                         │         VOICE_STATE_IDLE                │◄─────┘
+                         │  - 等待唤醒词/按键                       │
+                         │  - AFE 恢复检测                          │
+                         └─────────────────────────────────────────┘
+```
+
+## VAD 静音检测配置
+
+```c
+// firmware/s3/main/button_voice.c
+#define VAD_FRAME_MS            60      /* 每帧 60ms */
+#define VAD_SILENCE_FRAMES      (CONFIG_VAD_SILENCE_TIMEOUT_MS / VAD_FRAME_MS)
+#define VAD_RMS_THRESHOLD       CONFIG_VAD_RMS_THRESHOLD
+#define VAD_MIN_SPEECH_FRAMES   (CONFIG_VAD_MIN_SPEECH_MS / VAD_FRAME_MS)
+```
+
+默认配置:
+- 静音超时: 1500ms (25 帧)
+- RMS 阈值: 100
+- 最小语音时长: 300ms (5 帧)
 
 # 开发环境
 

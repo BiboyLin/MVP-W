@@ -552,6 +552,22 @@ void voice_recorder_stop(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Public: Pause wake word detection before TTS                        */
+/* ------------------------------------------------------------------ */
+
+void voice_recorder_pause_wake_word(void)
+{
+#ifdef CONFIG_ENABLE_WAKE_WORD
+    if (g_wake_word_ctx != NULL) {
+        ESP_LOGI(TAG, "Pausing wake word detection for TTS");
+        hal_wake_word_stop(g_wake_word_ctx);
+        /* Wait for detection task to finish current fetch */
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+#endif
+}
+
+/* ------------------------------------------------------------------ */
 /* Public: Resume wake word detection after TTS                       */
 /* ------------------------------------------------------------------ */
 
