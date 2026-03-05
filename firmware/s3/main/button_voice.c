@@ -386,7 +386,7 @@ static void button_callback(bool pressed)
             ESP_LOGI(TAG, "Button PRESSED - starting recording");
             g_recording_triggered_by_wake_word = false;
             voice_recorder_process_event(VOICE_EVENT_BUTTON_PRESS);
-            display_update("Recording...", "normal", 0, NULL);
+            display_update("Recording...", "listening", 0, NULL);
         } else if (g_state == VOICE_STATE_RECORDING) {
             /* Already recording (wake word mode) - short press to stop */
             ESP_LOGI(TAG, "Button PRESSED (short) - stopping recording (wake word mode)");
