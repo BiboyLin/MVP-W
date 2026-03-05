@@ -74,6 +74,27 @@ int emoji_get_frame_count(emoji_anim_type_t type);
 void emoji_free_all(void);
 
 /**
+ * @brief Check if emoji images have been loaded
+ * @return true if emoji_load_all_images* was already called successfully
+ */
+bool emoji_images_loaded(void);
+
+/**
+ * @brief Callback called after each emoji type finishes loading
+ * @param type        The type just loaded
+ * @param types_done  How many types have been loaded so far (1-based)
+ * @param types_total Total number of types
+ */
+typedef void (*emoji_progress_cb_t)(emoji_anim_type_t type, int types_done, int types_total);
+
+/**
+ * @brief Load all emoji images from SPIFFS with per-type progress callback
+ * @param cb  Progress callback (may be NULL)
+ * @return 0 on success, -1 if no images loaded
+ */
+int emoji_load_all_images_with_cb(emoji_progress_cb_t cb);
+
+/**
  * @brief Get emoji type name string
  * @param type Emoji type
  * @return Name string, or "unknown"

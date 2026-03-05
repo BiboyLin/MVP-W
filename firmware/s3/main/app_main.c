@@ -15,11 +15,13 @@
 #include "hal_uart.h"
 #include "hal_audio.h"
 #include "hal_display.h"
+#include "boot_animation.h"
+#include "emoji_png.h"
 #include "sensecap-watcher.h"
 
 #define TAG "MAIN"
 
-/* Hardware test mode (set to 1 for self-test) */
+/* Hardware test mode (set to 0 for self-test) */
 #define ENABLE_HW_SELFTEST  1
 
 /* Physical restart: click count to trigger reboot */
@@ -55,9 +57,18 @@ static void on_button_multi_click_restart(void)
 /* Hardware Self-Test                                                 */
 /* ------------------------------------------------------------------ */
 
+/* Emoji loading progress callback (called from app_main context) */
+static void on_emoji_type_loaded(emoji_anim_type_t type, int types_done, int types_total)
+{
+    /* Map emoji loading to 45% - 90% range */
+    int progress = 45 + (types_done * 45) / types_total;
+    boot_anim_set_progress(progress);
+    boot_anim_set_text(emoji_type_name(type));
+}
+
 #if ENABLE_HW_SELFTEST
 
-/* Note: Display test is done by display_ui_init() which calls hal_display_init() */
+/* Note: Display test is done by hal_display_ui_init() which calls hal_display_minimal_init() */
 
 static int test_uart(void)
 {
@@ -101,7 +112,7 @@ static void run_hw_selftest(void)
     ESP_LOGI(TAG, "   HARDWARE SELF-TEST START");
     ESP_LOGI(TAG, "=====================================");
 
-    /* Display already initialized by display_ui_init() */
+    /* Display already initialized by boot_anim_init() */
     ESP_LOGI(TAG, "[TEST] Display PASS (initialized)");
 
     /* UART test */
@@ -123,13 +134,14 @@ static void run_hw_selftest(void)
              pass_count, fail_count);
     ESP_LOGI(TAG, "=====================================");
 
-    /* Display result on screen */
+    /* Display result on screen (do NOT jump to 100% - boot continues) */
     if (fail_count == 0) {
-        display_update("HW TEST OK", "happy", 0, NULL);
+        boot_anim_set_progress(15);
+        boot_anim_set_text("HW OK");
     } else {
         char msg[32];
         snprintf(msg, sizeof(msg), "FAIL:%d", fail_count);
-        display_update(msg, "sad", 0, NULL);
+        boot_anim_show_error(msg);
     }
 }
 
@@ -143,83 +155,101 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "MVP-W S3 v1.0 starting");
 
-    /* 1. Initialize display first (for status feedback) */
-    display_ui_init();
-    display_update("Starting...", "normal", 0, NULL);
+    /* 1. Minimal display init for boot animation */
+    if (hal_display_minimal_init() != 0) {
+        ESP_LOGE(TAG, "Failed to initialize display");
+        return;
+    }
 
-    /* 2. Initialize UART bridge to MCU */
+    /* 2. Show boot animation */
+    boot_anim_init();
+    boot_anim_set_text("Initializing...");
+
+    /* 3. UART bridge to MCU */
+    boot_anim_set_progress(10);
+    boot_anim_set_text("UART...");
     uart_bridge_init();
 
 #if ENABLE_HW_SELFTEST
-    /* Run hardware self-test */
     run_hw_selftest();
-
-    ESP_LOGI(TAG, "Self-test complete. Waiting 5s...");
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    /* Continue regardless of result (non-fatal) */
 #endif
 
-    /* 3. Initialize voice recorder */
+    /* 4. Voice recorder: init only (do NOT start yet - wait until after emoji load) */
+    boot_anim_set_progress(20);
+    boot_anim_set_text("Voice...");
     voice_recorder_init();
 
-    /* 3.1 Start voice recorder task (handles audio tick and button poll) */
-    if (voice_recorder_start() != 0) {
-        ESP_LOGE(TAG, "Failed to start voice recorder task");
-    }
-
-    /* 3.5 Register button callbacks (SDK already initialized IO expander) */
+    /* 5. Register button callbacks */
     bsp_set_btn_long_press_cb(on_button_long_press);
     bsp_set_btn_long_release_cb(on_button_long_release);
-    /* 3.6 Register multi-click restart callback (5 clicks to reboot) */
     bsp_set_btn_multi_click_cb(RESTART_CLICK_COUNT, on_button_multi_click_restart);
     ESP_LOGI(TAG, "Button callbacks registered via SDK");
 
-    /* 4. Initialize and connect to WiFi */
-    display_update("Connecting WiFi...", "normal", 0, NULL);
-    wifi_init();  /* Initialize WiFi driver */
+    /* 6. Initialize and connect to WiFi */
+    boot_anim_set_progress(25);
+    boot_anim_set_text("WiFi...");
+    wifi_init();
     if (wifi_connect() != 0) {
-        ESP_LOGE(TAG, "WiFi connection failed");
-        display_update("WiFi Error", "sad", 0, NULL);
-        /* Continue anyway - may connect later */
-    } else {
-        ESP_LOGI(TAG, "WiFi connected");
+        boot_anim_show_error("WiFi Error");
+        return;
     }
+    ESP_LOGI(TAG, "WiFi connected");
+    boot_anim_set_progress(35);
 
-    /* 5. Service discovery - find WebSocket server via UDP broadcast */
-    display_update("Finding Server...", "normal", 0, NULL);
+    /* 7. Service discovery */
+    boot_anim_set_text("Discovering...");
     discovery_init();
-
     server_info_t server_info = {0};
-    if (discovery_start(&server_info) == 0) {
-        ESP_LOGI(TAG, "Server discovered: %s:%u", server_info.ip, server_info.port);
-        display_update("Server Found", "happy", 0, NULL);
+    if (discovery_start(&server_info) != 0) {
+        boot_anim_show_error("Server Not Found");
+        return;
+    }
+    ESP_LOGI(TAG, "Server discovered: %s:%u", server_info.ip, server_info.port);
+    boot_anim_set_progress(40);
 
-        /* Set WebSocket URL from discovery result */
-        char *ws_url = discovery_get_ws_url(&server_info);
-        if (ws_url) {
-            ws_client_set_server_url(ws_url);
-            free(ws_url);
-        }
-    } else {
-        ESP_LOGW(TAG, "Server discovery failed, using default URL");
-        display_update("Using Default", "normal", 0, NULL);
-        /* Will use default hardcoded URL */
+    /* Set WebSocket URL */
+    char *ws_url = discovery_get_ws_url(&server_info);
+    if (ws_url) {
+        ws_client_set_server_url(ws_url);
+        free(ws_url);
     }
 
-    /* 6. Initialize WebSocket client */
-    ws_client_init();
+    /* 8. SPIFFS init + emoji loading (45% → 90%, the longest stage ~36s)
+     * Voice recorder NOT started yet - prevents AFE ring buffer overflow during load */
+    boot_anim_set_progress(45);
+    boot_anim_set_text("Loading...");
+    if (emoji_spiffs_init() == 0) {
+        emoji_load_all_images_with_cb(on_emoji_type_loaded);
+    } else {
+        ESP_LOGW(TAG, "SPIFFS init failed (emoji disabled)");
+        boot_anim_set_progress(90);
+    }
 
-    /* 7. Register message router handlers */
+    /* 9. Start voice recorder now (AFE ring buffer empty, no overflow risk) */
+    if (voice_recorder_start() != 0) {
+        ESP_LOGE(TAG, "Failed to start voice recorder (non-fatal)");
+    }
+
+    /* 10. Initialize WebSocket client */
+    boot_anim_set_progress(92);
+    boot_anim_set_text("Connecting...");
+    ws_client_init();
     ws_router_t router = ws_handlers_get_router();
     ws_router_init(&router);
     ESP_LOGI(TAG, "WS router handlers registered");
-
-    /* 8. Start WebSocket connection */
-    display_update("Connecting Cloud...", "normal", 0, NULL);
     ws_client_start();
 
-    /* 9. Ready */
-    ESP_LOGI(TAG, "Ready");
+    /* 10. Ready! */
+    boot_anim_set_progress(100);
+    boot_anim_set_text("Ready!");
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    /* 11. Finish boot animation, switch to main UI */
+    boot_anim_finish();
+    hal_display_ui_init();
     display_update("Ready", "happy", 0, NULL);
+    ESP_LOGI(TAG, "Ready");
 
     /* Main loop - feed watchdog and check TTS timeout */
     esp_task_wdt_add(NULL);

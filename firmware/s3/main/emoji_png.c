@@ -28,6 +28,13 @@ static const uint8_t PNG_HEADER[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0
 lv_img_dsc_t *g_emoji_images[EMOJI_ANIM_COUNT][MAX_EMOJI_IMAGES];
 int g_emoji_counts[EMOJI_ANIM_COUNT];
 
+static bool g_images_loaded = false;
+
+bool emoji_images_loaded(void)
+{
+    return g_images_loaded;
+}
+
 /* Emoji type prefixes */
 static const char *emoji_prefixes[] = {
     "greeting",
@@ -260,9 +267,13 @@ static int load_emoji_type(emoji_anim_type_t type)
 
 int emoji_load_all_images(void)
 {
+    return emoji_load_all_images_with_cb(NULL);
+}
+
+int emoji_load_all_images_with_cb(emoji_progress_cb_t cb)
+{
     ESP_LOGI(TAG, "Loading all emoji images from SPIFFS...");
 
-    /* Initialize arrays */
     memset(g_emoji_images, 0, sizeof(g_emoji_images));
     memset(g_emoji_counts, 0, sizeof(g_emoji_counts));
 
@@ -274,9 +285,13 @@ int emoji_load_all_images(void)
         } else {
             total += count;
         }
+        if (cb) {
+            cb((emoji_anim_type_t)i, i + 1, EMOJI_ANIM_COUNT);
+        }
     }
 
     ESP_LOGI(TAG, "Total %d emoji images loaded", total);
+    g_images_loaded = (total > 0);
     return total > 0 ? 0 : -1;
 }
 
