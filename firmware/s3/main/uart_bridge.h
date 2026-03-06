@@ -16,16 +16,28 @@ typedef struct {
 void uart_bridge_init(void);
 
 /**
- * Convert servo command to MCU protocol format and send
+ * Send single servo command (v2.1 format)
  *
- * Input: JSON servo command (x, y angles 0-180)
- * Output: "X:<x>\r\nY:<y>\r\n" sent via UART
+ * Protocol: "X:<angle>:<duration>\r\n" or "Y:<angle>:<duration>\r\n"
+ *
+ * @param id Servo identifier ("x" or "y")
+ * @param angle Angle value (0-180)
+ * @param duration_ms Movement duration in milliseconds (0 = smooth mode)
+ * @return 0 on success, -1 on error
+ */
+int uart_bridge_send_servo_single(const char *id, int angle, int duration_ms);
+
+/**
+ * Send dual servo command (legacy format)
+ *
+ * Protocol: "X:<x>:<duration>\r\nY:<y>:<duration>\r\n"
  *
  * @param x X-axis angle (0-180)
  * @param y Y-axis angle (0-180)
+ * @param duration_ms Movement duration in milliseconds
  * @return 0 on success, -1 on error
  */
-int uart_bridge_send_servo(int x, int y);
+int uart_bridge_send_servo(int x, int y, int duration_ms);
 
 /**
  * Get bridge statistics

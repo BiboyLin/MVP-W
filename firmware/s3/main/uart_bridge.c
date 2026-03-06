@@ -6,11 +6,25 @@
 
 #define TAG "UART_BRIDGE"
 
+/* Default duration for smooth movement (ms) */
+#define DEFAULT_DURATION_MS 100
+
 /* ------------------------------------------------------------------ */
 /* Private: Statistics                                                */
 /* ------------------------------------------------------------------ */
 
 static uart_bridge_t g_stats = {0};
+
+/* ------------------------------------------------------------------ */
+/* Private: Clamp angle to valid range                                */
+/* ------------------------------------------------------------------ */
+
+static int clamp_angle(int angle)
+{
+    if (angle < 0) return 0;
+    if (angle > 180) return 180;
+    return angle;
+}
 
 /* ------------------------------------------------------------------ */
 /* Public: Initialize                                                 */
@@ -51,27 +65,92 @@ void uart_bridge_get_stats(uart_bridge_t *out_stats)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Send servo command (synchronous - fast enough for small data) */
+/* Public: Send single servo command (v2.1 format)                   */
 /* ------------------------------------------------------------------ */
 
-int uart_bridge_send_servo(int x, int y)
+/**
+ * Send single servo command
+ * Protocol: "X:<angle>:<duration>\r\n" or "Y:<angle>:<duration>\r\n"
+ *
+ * Examples:
+ *   - "X:90:500\r\n" (X-axis to 90 degrees, 500ms)
+ *   - "Y:45:300\r\n" (Y-axis to 45 degrees, 300ms)
+ */
+int uart_bridge_send_servo_single(const char *id, int angle, int duration_ms)
 {
-    /* Clamp values to valid range */
-    if (x < 0) x = 0;
-    if (x > 180) x = 180;
-    if (y < 0) y = 0;
-    if (y > 180) y = 180;
+    if (!id) {
+        g_stats.error_count++;
+        return -1;
+    }
 
-    /* Format: "X:<x>\r\nY:<y>\r\n" - only 16-20 bytes, very fast */
-    char buf[32];
-    int len = snprintf(buf, sizeof(buf), "X:%d\r\nY:%d\r\n", x, y);
+    /* Clamp angle to valid range */
+    angle = clamp_angle(angle);
+
+    /* Use default duration if not specified */
+    if (duration_ms < 0) {
+        duration_ms = DEFAULT_DURATION_MS;
+    }
+
+    /* Convert id to uppercase for protocol */
+    char axis = (id[0] == 'x' || id[0] == 'X') ? 'X' : 'Y';
+
+    /* Format: "X:<angle>:<duration>\r\n" or "Y:<angle>:<duration>\r\n" */
+    char buf[24];
+    int len = snprintf(buf, sizeof(buf), "%c:%d:%d\r\n", axis, angle, duration_ms);
 
     if (len < 0 || len >= (int)sizeof(buf)) {
         g_stats.error_count++;
         return -1;
     }
 
-    /* Send via HAL - synchronous but fast (~1ms for 20 bytes at 115200) */
+    ESP_LOGI(TAG, "UART servo single: %s", buf);
+
+    /* Send via HAL */
+    int sent = hal_uart_send((uint8_t *)buf, len);
+    if (sent != len) {
+        g_stats.error_count++;
+        return -1;
+    }
+
+    g_stats.tx_count++;
+    return 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: Send dual servo command (legacy format)                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Send dual servo command
+ * Protocol: "X:<x>:<duration>\r\nY:<y>:<duration>\r\n"
+ *
+ * Examples:
+ *   - X:90:100\r\nY:45:100\r\n (both axes, 100ms)
+ */
+int uart_bridge_send_servo(int x, int y, int duration_ms)
+{
+    /* Clamp values to valid range */
+    x = clamp_angle(x);
+    y = clamp_angle(y);
+
+    /* Use default duration if not specified */
+    if (duration_ms < 0) {
+        duration_ms = DEFAULT_DURATION_MS;
+    }
+
+    /* Format: "X:<x>:<duration>\r\nY:<y>:<duration>\r\n" */
+    char buf[48];
+    int len = snprintf(buf, sizeof(buf), "X:%d:%d\r\nY:%d:%d\r\n",
+                       x, duration_ms, y, duration_ms);
+
+    if (len < 0 || len >= (int)sizeof(buf)) {
+        g_stats.error_count++;
+        return -1;
+    }
+
+    ESP_LOGD(TAG, "UART servo dual: %s", buf);
+
+    /* Send via HAL */
     int sent = hal_uart_send((uint8_t *)buf, len);
     if (sent != len) {
         g_stats.error_count++;

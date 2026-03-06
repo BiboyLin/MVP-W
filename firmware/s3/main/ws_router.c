@@ -1,11 +1,12 @@
 /**
  * @file ws_router.c
- * @brief WebSocket message router implementation (Protocol v2.0)
+ * @brief WebSocket message router implementation (Protocol v2.1)
  */
 
 #include "ws_router.h"
 #include "cJSON.h"
 #include <string.h>
+#include <limits.h>
 
 /* ------------------------------------------------------------------ */
 /* Private: Router context                                            */
@@ -66,7 +67,7 @@ static void copy_string(char *dst, size_t dst_size, const char *src)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Route message to appropriate handler (v2.0 format)         */
+/* Public: Route message to appropriate handler (v2.1 format)          */
 /* ------------------------------------------------------------------ */
 
 ws_msg_type_t ws_route_message(const char *json_str)
@@ -93,13 +94,13 @@ ws_msg_type_t ws_route_message(const char *json_str)
     if (strcmp(type, "servo") == 0) {
         msg_type = WS_MSG_SERVO;
         if (g_router.on_servo) {
-            /* v2.0 format: data.x, data.y */
+            /* v2.1 format: data.id, data.angle, data.time */
             cJSON *data = cJSON_GetObjectItem(root, "data");
             if (data && cJSON_IsObject(data)) {
-                ws_servo_cmd_t cmd = {
-                    .x = get_int(data, "x", 90),
-                    .y = get_int(data, "y", 90),
-                };
+                ws_servo_cmd_t cmd = {0};
+                copy_string(cmd.id, sizeof(cmd.id), get_string(data, "id"));
+                int angle1 = get_int(data, "angle", INT_MIN); int angle2 = get_int(data, "Angle", INT_MIN); cmd.angle = (angle1 != INT_MIN) ? angle1 : angle2; if (cmd.angle == INT_MIN) cmd.angle = 90;
+                cmd.time_ms = get_int(data, "time", 100);
                 g_router.on_servo(&cmd);
             }
         }
@@ -205,7 +206,7 @@ ws_msg_type_t ws_route_message(const char *json_str)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse servo command (v2.0 format)                          */
+/* Public: Parse servo command (v2.1 format)                         */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_servo(const char *json_str, ws_servo_cmd_t *out_cmd)
@@ -219,14 +220,18 @@ int ws_parse_servo(const char *json_str, ws_servo_cmd_t *out_cmd)
         return -1;
     }
 
-    /* v2.0 format: data.x, data.y */
+    /* v2.1 format: data.id, data.angle, data.time */
+    memset(out_cmd, 0, sizeof(*out_cmd));
     cJSON *data = cJSON_GetObjectItem(root, "data");
     if (data && cJSON_IsObject(data)) {
-        out_cmd->x = get_int(data, "x", 90);
-        out_cmd->y = get_int(data, "y", 90);
+        copy_string(out_cmd->id, sizeof(out_cmd->id), get_string(data, "id"));
+        int angle1 = get_int(data, "angle", INT_MIN); int angle2 = get_int(data, "Angle", INT_MIN); out_cmd->angle = (angle1 != INT_MIN) ? angle1 : angle2; if (out_cmd->angle == INT_MIN) out_cmd->angle = 90;
+        out_cmd->time_ms = get_int(data, "time", 100);
     } else {
-        out_cmd->x = 90;
-        out_cmd->y = 90;
+        /* Default values */
+        strncpy(out_cmd->id, "x", sizeof(out_cmd->id) - 1);
+        out_cmd->angle = 90;
+        out_cmd->time_ms = 100;
     }
 
     cJSON_Delete(root);
@@ -287,7 +292,7 @@ int ws_parse_status(const char *json_str, ws_status_cmd_t *out_cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse ASR result (v2.0 format)                             */
+/* Public: Parse ASR result (v2.0 format)                            */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_asr_result(const char *json_str, ws_asr_result_cmd_t *out_cmd)
@@ -311,7 +316,7 @@ int ws_parse_asr_result(const char *json_str, ws_asr_result_cmd_t *out_cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse bot reply (v2.0 format)                              */
+/* Public: Parse bot reply (v2.0 format)                             */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_bot_reply(const char *json_str, ws_bot_reply_cmd_t *out_cmd)
@@ -335,7 +340,7 @@ int ws_parse_bot_reply(const char *json_str, ws_bot_reply_cmd_t *out_cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Public: Parse error message (v2.0 format)                          */
+/* Public: Parse error message (v2.0 format)                         */
 /* ------------------------------------------------------------------ */
 
 int ws_parse_error(const char *json_str, ws_error_cmd_t *out_cmd)

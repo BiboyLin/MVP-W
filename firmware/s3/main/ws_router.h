@@ -9,7 +9,7 @@ typedef enum {
     WS_MSG_UNKNOWN = 0,
 
     /* Control commands (Cloud -> Watcher) - v2.0 format */
-    WS_MSG_SERVO,           /* {"type": "servo", "code": 0, "data": {"x": 90, "y": 45}} */
+    WS_MSG_SERVO,           /* {"type": "servo", "data": {"id": "x", "angle": 90, "time": 500}} */
     WS_MSG_DISPLAY,         /* {"type": "display", "code": 0, "data": {"text": "...", "emoji": "happy"}} */
     WS_MSG_CAPTURE,         /* {"type": "capture", "code": 0, "data": {"quality": 80}} */
     WS_MSG_STATUS,          /* {"type": "status", "code": 0, "data": "状态描述"} */
@@ -38,10 +38,12 @@ typedef enum {
     WS_MSG_STATUS_OLD,      /* Old format with state/message fields */
 } ws_msg_type_t;
 
-/* Servo command structure */
+/* Servo command structure (v2.1 format) */
+#define WS_SERVO_ID_MAX 8
 typedef struct {
-    int x;  /* 0-180 */
-    int y;  /* 0-180 */
+    char id[WS_SERVO_ID_MAX];   /* "x" or "y" - servo identifier */
+    int angle;                  /* 0-180 */
+    int time_ms;               /* movement duration in ms */
 } ws_servo_cmd_t;
 
 /* Display command structure */
@@ -134,7 +136,7 @@ void ws_router_init(ws_router_t *router);
 ws_msg_type_t ws_route_message(const char *json_str);
 
 /**
- * Parse servo command from JSON (v2.0 format)
+ * Parse servo command from JSON (v2.1 format)
  * @param json_str JSON string
  * @param out_cmd Output structure
  * @return 0 on success, -1 on error

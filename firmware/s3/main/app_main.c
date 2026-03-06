@@ -75,7 +75,7 @@ static int test_uart(void)
     ESP_LOGI(TAG, "[TEST] UART...");
     /* Note: hal_uart_init is called by uart_bridge_init */
     /* Send test command to MCU */
-    int ret = uart_bridge_send_servo(90, 90);
+    int ret = uart_bridge_send_servo(90, 90, 100);
     if (ret != 0) {
         ESP_LOGE(TAG, "[TEST] UART send failed");
         return -1;

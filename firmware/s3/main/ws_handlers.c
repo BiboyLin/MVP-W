@@ -1,6 +1,6 @@
 /**
  * @file ws_handlers.c
- * @brief WebSocket message handlers implementation (Protocol v2.0)
+ * @brief WebSocket message handlers implementation (Protocol v2.1)
  */
 
 #include "ws_handlers.h"
@@ -12,6 +12,9 @@
 #include <string.h>
 
 #define TAG "WS_HANDLERS"
+
+/* Default servo movement duration (ms) */
+#define SERVO_DEFAULT_DURATION_MS 100
 
 /* ------------------------------------------------------------------ */
 /* Helper: Parse status data to determine emoji                       */
@@ -64,7 +67,7 @@ const char* ws_status_data_to_emoji(const char *data)
 }
 
 /* ------------------------------------------------------------------ */
-/* Handler: Servo Command                                             */
+/* Handler: Servo Command (v2.1 format)                               */
 /* ------------------------------------------------------------------ */
 
 void on_servo_handler(const ws_servo_cmd_t *cmd)
@@ -74,10 +77,12 @@ void on_servo_handler(const ws_servo_cmd_t *cmd)
     }
 
     /* Use ESP_LOGD to avoid flooding logs with high-frequency servo commands */
-    ESP_LOGD(TAG, "Servo command: x=%d, y=%d", cmd->x, cmd->y);
+    ESP_LOGI(TAG, "Servo command: id=%s, angle=%d, time=%d",
+             cmd->id, cmd->angle, cmd->time_ms);
 
-    /* Forward to MCU via UART */
-    uart_bridge_send_servo(cmd->x, cmd->y);
+    /* Send single servo command via UART */
+    /* Protocol: "X:<angle>:<duration>\r\n" or "Y:<angle>:<duration>\r\n" */
+    uart_bridge_send_servo_single(cmd->id, cmd->angle, cmd->time_ms);
 }
 
 /* ------------------------------------------------------------------ */
@@ -179,7 +184,7 @@ void on_bot_reply_handler(const ws_bot_reply_cmd_t *cmd)
 }
 
 /* ------------------------------------------------------------------ */
-/* Handler: TTS End (v2.0)                                            */
+/* Handler: TTS End (v2.0)                                           */
 /* ------------------------------------------------------------------ */
 
 void on_tts_end_handler(void)

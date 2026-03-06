@@ -62,7 +62,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
                 char *msg = strndup((char *)data->data_ptr, data->data_len);
                 if (msg) {
                     /* Use ESP_LOGD to avoid flooding logs with high-frequency messages */
-                    ESP_LOGD(TAG, "Received text: %s", msg);
+                    ESP_LOGI(TAG, "WS received: %s", msg);
 
                     /* End TTS playback when receiving tts_end or non-TTS message */
                     if (tts_playing) {
@@ -85,6 +85,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base,
             }
             else if (data->op_code == WS_TRANSPORT_OPCODES_BINARY) {
                 /* Handle binary message (TTS audio - raw PCM) */
+                ESP_LOGI(TAG, "WS received binary: %d bytes", data->data_len);
                 ws_handle_tts_binary((const uint8_t *)data->data_ptr, data->data_len);
             }
             break;
