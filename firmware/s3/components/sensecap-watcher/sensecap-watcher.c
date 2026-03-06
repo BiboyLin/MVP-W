@@ -958,12 +958,11 @@ esp_err_t bsp_audio_init(const i2s_std_config_t *i2s_config)
     chan_cfg.auto_clear = true; // Auto clear the legacy data in the DMA buffer
     chan_cfg.intr_priority = 4;
     /* Increase DMA buffer size to reduce audio playback stuttering
-     * Default: dma_desc_num=2, dma_frame_num=240 (~480 frames total)
-     * New: dma_desc_num=6, dma_frame_num=480 (~2880 frames total, 6x larger)
-     * This provides ~120ms buffer at 24kHz/16-bit/mono, reducing blocking
+     * DMA buffer config via Kconfig: BSP_AUDIO_DMA_BUFFER_NUM × BSP_AUDIO_DMA_BUFFER_SIZE*
+     * Total: CONFIG_BSP_AUDIO_DMA_BUFFER_NUM × CONFIG_BSP_AUDIO_DMA_BUFFER_SIZE (default 24KB for ~500ms at 24kHz)
      */
-    chan_cfg.dma_desc_num = 6;
-    chan_cfg.dma_frame_num = 480;
+    chan_cfg.dma_desc_num = CONFIG_BSP_AUDIO_DMA_BUFFER_NUM;
+    chan_cfg.dma_frame_num = CONFIG_BSP_AUDIO_DMA_BUFFER_SIZE;
     BSP_ERROR_CHECK_RETURN_ERR(i2s_new_channel(&chan_cfg, &i2s_tx_chan, &i2s_rx_chan));
 
     /* Setup I2S channels */

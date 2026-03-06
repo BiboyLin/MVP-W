@@ -27,7 +27,8 @@
 static esp_websocket_client_handle_t ws_client = NULL;
 static bool is_connected = false;
 static bool tts_playing = false;  /* TTS playback state */
-static bool waiting_for_response = false;  /* Waiting for server response after audio sent */
+static bool waiting_for_response = false;
+static int timeout_display_count = 0;  /* Limit timeout display to 1 time */
 static int64_t response_wait_start_time = 0;  /* Timestamp when response wait started */
 static char ws_server_url[WS_URL_MAX_LEN] = WS_DEFAULT_URL;  /* Dynamic server URL */
 
@@ -245,6 +246,7 @@ int ws_send_audio_end(void)
 {
     /* Start response timeout timer */
     waiting_for_response = true;
+    timeout_display_count = 0;  /* Reset timeout display counter */
     response_wait_start_time = esp_timer_get_time();
     ESP_LOGI(TAG, "Audio end sent, waiting for response (timeout %dms)", RESPONSE_TIMEOUT_MS);
 
@@ -275,6 +277,8 @@ void ws_handle_tts_binary(const uint8_t *data, int len)
     /* Only update display and start audio on first chunk */
     if (!tts_playing) {
         ESP_LOGI(TAG, "TTS started, first chunk: %d bytes", len);
+        /* Clear response wait flag - server has responded with TTS */
+        waiting_for_response = false;
         display_update("", "speaking", 0, NULL);
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
@@ -315,6 +319,11 @@ void ws_tts_complete(void)
         vTaskDelay(pdMS_TO_TICKS(500));
 
         hal_audio_stop();
+        /* Restore recording mode before sample rate switch (avoid I2S error) */
+        hal_audio_set_playback_mode(false);
+
+        /* Wait 1 second for DMA buffer to fully drain before switching sample rate */
+        vTaskDelay(pdMS_TO_TICKS(1000));
         /* Restore 16kHz for recording */
         hal_audio_set_sample_rate(16000);
 
@@ -322,7 +331,6 @@ void ws_tts_complete(void)
         tts_playing = false;
 
         /* Restore recording mode for wake word detection */
-        hal_audio_set_playback_mode(false);
     }
 
 #ifdef CONFIG_ENABLE_WAKE_WORD
@@ -347,13 +355,14 @@ void ws_tts_timeout_check(void)
     /* Check if we've been waiting too long for a response */
     if (waiting_for_response) {
         int64_t elapsed_ms = (esp_timer_get_time() - response_wait_start_time) / 1000;
-        if (elapsed_ms > RESPONSE_TIMEOUT_MS) {
+        if (elapsed_ms > RESPONSE_TIMEOUT_MS && timeout_display_count < 1) {
             ESP_LOGW(TAG, "Response timeout (%lld ms), resuming wake word detection", elapsed_ms);
             waiting_for_response = false;
 
             /* Resume wake word detection */
             voice_recorder_resume_wake_word();
             display_update("Timeout", "sad", 0, NULL);
+            timeout_display_count++;
         }
     }
 #endif
