@@ -1,31 +1,83 @@
-# Build artifacts
-build/
-**/test_host/build/
-*.bin
-*.elf
-*.map
+# ============================
+# MVP-W .gitignore
+# ============================
 
-# ESP-IDF
+# === ESP-IDF 构建 ===
+build/
+**/build/
 sdkconfig
 sdkconfig.old
 sdkconfig.backup
-.pytest_cache/
-__pycache__/
-managed_components/
 dependencies.lock
+managed_components/
 
-# Python
+# === Host 测试 ===
+**/test_host/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+Testing/
+
+# === 二进制文件 ===
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.obj
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
 venv/
-*.pyc
-.env
+.venv/
+*.egg-info/
+.eggs/
+dist/
+wheels/
 
-# IDE
+# === 环境变量 ===
+.env
+.env.local
+.env.*.local
+
+# === IDE / 编辑器 ===
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+*.sublime-*
 
-# OS
+# === 操作系统 ===
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Logs
+# === 日志 ===
 *.log
+logs/
+
+# === 临时文件 ===
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# === Claude Code ===
+memory/
+.claude/
+
+# === Doxygen 生成 ===
+docs/api/
+html/
+latex/
