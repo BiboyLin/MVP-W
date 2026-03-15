@@ -76,8 +76,11 @@ idf.py -p COM4 flash monitor
 
 ### 运行云端服务器
 
+云端服务器位于独立的 [watcher-server](https://github.com/BiboyLin/watcher-server) 仓库：
+
 ```bash
-cd ../watcher-server
+git clone https://github.com/BiboyLin/watcher-server.git
+cd watcher-server
 pip install -r requirements.txt
 cp .env.example .env
 # 编辑 .env 填入 API Keys
@@ -88,8 +91,6 @@ python src/main.py
 
 ```
 MVP-W/
-├── CLAUDE.md                    # 架构文档 (详细)
-├── PRD.md                       # 产品需求文档
 ├── README.md                    # 本文件
 │
 ├── firmware/
@@ -163,9 +164,10 @@ MVP-W/
 
 ## 文档
 
-- [架构文档 (CLAUDE.md)](./CLAUDE.md) - 完整系统设计
+- [架构文档](./docs/ARCHITECTURE.md) - 系统架构概述 (EN/CN)
 - [通信协议](./docs/COMMUNICATION_PROTOCOL.md) - WebSocket 协议规范
 - [构建指南](./firmware/s3/BUILD_INSTRUCTIONS.md) - 详细构建步骤
+- [更新日志](./CHANGELOG.md) - 版本历史
 
 ## 贡献
 
