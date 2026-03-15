@@ -9,8 +9,8 @@
 #define TAG "WIFI"
 
 /* WiFi configuration (MVP: hardcoded) */
-#define WIFI_SSID     "Bobby"
-#define WIFI_PASS     "19980602"
+#define WIFI_SSID     "TEST"
+#define WIFI_PASS     "12345678"
 
 #define WIFI_CONNECTED_BIT BIT0
 

@@ -21,6 +21,7 @@ Testing/
 
 # === 二进制文件 ===
 *.bin
+!releases/**/*.bin  # 允许 releases 目录中的固件
 *.elf
 *.hex
 *.map
