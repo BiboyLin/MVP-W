@@ -3,9 +3,9 @@
 
 <div align="center">
 
-# WatcherRobot Body
+# MVP-W MCU Firmware
 
-**ESP32 BLE 遥控机器人固件**
+**ESP32 舵机控制 + BLE 固件**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.2+-green.svg)](https://docs.espressif.com/projects/esp-idf/)
@@ -13,25 +13,26 @@
 
 </div>
 
-基于 ESP32 的 BLE 遥控机器人项目，支持通过蓝牙远程控制两个 PWM 舵机，具有平滑移动和预设动作功能。后续可扩展 UART 与其他 MCU 通信。
+MVP-W MCU 固件，用于控制双轴舵机云台。支持 BLE 蓝牙控制和 UART 串口通信（与 S3 主控通信）。
+
+## 功能特性
+
+- **双轴舵机控制** - GPIO 12 (X轴) + GPIO 15 (Y轴)
+- **BLE GATT 服务** - 手机蓝牙远程控制
+- **UART 通信** - 与 S3 主控双向通信
+- **平滑移动** - 三种控制模式
+- **预设动作** - 内置挥手、问候等动作
 
 ## 项目架构
 
 ```
 main/
 ├── app_main.c              # 应用入口
-├── command/                # 命令解析层
-│   ├── command.h
-│   └── command.c
+├── command/                # 命令解析层 (BLE/UART 统一)
 ├── servo/                  # 舵机控制层
-│   ├── servo.h
-│   └── servo.c
 ├── action/                 # 动作管理层
-│   ├── action.h
-│   └── action.c
 ├── ble/                    # BLE 通信层
-│   ├── ble.h
-│   └── ble.c
+├── uart/                   # UART 通信层 (与 S3 通信)
 └── CMakeLists.txt
 ```
 
@@ -40,10 +41,71 @@ main/
 | 模块 | 功能 |
 |------|------|
 | **command** | 统一解析 BLE/UART 指令 |
-| **servo** | PWM 舵机控制 (GPIO 12, 15)，平滑跟踪+摇杆模式 |
+| **servo** | PWM 舵机控制，平滑跟踪+摇杆模式 |
 | **action** | 预设动作序列管理 |
 | **ble** | BLE GATT 通信服务 |
-| **uart** | UART 通信 (预留，后续扩展) |
+| **uart** | UART 通信 (与 S3 主控通信) |
+
+## 快速开始
+
+### 烧录固件
+
+**前置条件**：安装 esptool
+```bash
+pip install esptool
+```
+
+**Windows**:
+```powershell
+# 进入固件目录
+cd firmware/mcu
+
+# 烧录（自动检测串口）
+.\flash.ps1
+
+# 或指定串口
+.\flash.ps1 -Port COM4
+```
+
+**Linux/macOS**:
+```bash
+# 进入固件目录
+cd firmware/mcu
+
+# 添加执行权限
+chmod +x flash.sh
+
+# 烧录
+./flash.sh /dev/ttyUSB0
+```
+
+### 从源码构建
+
+**前置条件**：ESP-IDF v5.2+
+
+**Windows** (ESP-IDF PowerShell):
+```powershell
+# 激活 ESP-IDF 环境
+C:\Espressif\frameworks\esp-idf-v5.2.1\export.ps1
+
+# 构建
+.\build_release.ps1
+
+# 烧录
+.\flash.ps1 -Port COM4
+```
+
+**Linux/macOS**:
+```bash
+# 激活 ESP-IDF 环境
+source $HOME/esp/esp-idf/export.sh
+
+# 构建
+./build_release.sh
+
+# 烧录
+./flash.sh /dev/ttyUSB0
+```
 
 ## GATT 服务配置
 
@@ -54,21 +116,18 @@ main/
 | 0xFF02 | ACTION_CTRL | 动作控制特征 (读写) |
 | 0xFF03 | STATUS | 状态推送特征 (Notify) |
 
-## BLE 命令协议
+设备名称: **ESP_ROBOT**
+
+## 控制命令
 
 ### 模式1：平滑跟踪（转盘/滑块控制）
 
 ```
-SET_SERVO:0:90      # 设置X轴到90度（平滑跟踪，固定速度）
+SET_SERVO:0:90      # 设置X轴到90度
 SET_SERVO:1:120     # 设置Y轴到120度
 ```
 
-**格式**: `SET_SERVO:<舵机ID>:<角度>`
-
-**特点**：
-- 第4个参数为0或省略
-- 每15ms移动1°，速度固定约67°/s
-- APP可任意频率发送，舵机自动向最新目标平滑移动
+- 速度固定约 67°/s
 - 适合转盘、滑块控制
 
 ### 模式2：时间控制（指定时间到达）
@@ -78,30 +137,29 @@ SET_SERVO:0:90:500   # 500ms内到达90度
 SET_SERVO:1:120:1000 # 1000ms内到达120度
 ```
 
-**格式**: `SET_SERVO:<舵机ID>:<角度>:<时间ms>`
-
-**特点**：
-- 第4个参数为移动时间（50ms - 5000ms）
-- 速度动态计算：每步角度 = 总角度差 / (时间/15ms)
-- 适合动作表演（wave 2秒，greet 1秒）
+- 时间范围：50ms - 5000ms
+- 适合动作表演
 
 ### 模式3：摇杆模式（持续移动）
 
 ```
-SERVO_MOVE:0:1    # 舵机0正向持续移动
-SERVO_MOVE:0:-1   # 舵机0反向持续移动
-SERVO_MOVE:1:1    # 舵机1正向持续移动
-SERVO_MOVE:0:0    # 停止舵机0移动
-SERVO_MOVE:1:0    # 停止舵机1移动
+SERVO_MOVE:0:1    # 舵机0正向移动
+SERVO_MOVE:0:-1   # 舵机0反向移动
+SERVO_MOVE:0:0    # 停止舵机0
 ```
-
-**格式**：`SERVO_MOVE:<舵机ID>:<方向>` (方向: 1=正, -1=反, 0=停)
 
 ### 动作控制
 
 ```
-PLAY_ACTION:0      # 播放预设动作0 (wave)
-PLAY_ACTION:1      # 播放预设动作1 (greet)
+PLAY_ACTION:0      # 挥手动作
+PLAY_ACTION:1      # 问候动作
+```
+
+### 队列控制
+
+```
+QUEUE_ADD:0:90:500   # 添加舵机0到90度的延时任务
+QUEUE_CLEAR          # 清空队列
 ```
 
 ## 预设动作
@@ -113,53 +171,61 @@ PLAY_ACTION:1      # 播放预设动作1 (greet)
 
 ## 硬件配置
 
-- **舵机数量**: 2 个
-- **舵机 GPIO**: GPIO 12 (X轴), GPIO 15 (Y轴)
-- **X轴角度范围**: 30° ~ 150°
-- **Y轴角度范围**: 95° ~ 150°
-- **PWM 频率**: 50Hz (20ms 周期)
-- **脉宽范围**: 0.5ms - 2.5ms (对应 0-180°)
+| 参数 | 值 |
+|------|-----|
+| 芯片 | ESP32 |
+| 舵机数量 | 2 |
+| X轴 GPIO | GPIO 12 |
+| Y轴 GPIO | GPIO 15 |
+| X轴角度范围 | 30° ~ 150° |
+| Y轴角度范围 | 95° ~ 150° |
+| PWM 频率 | 50Hz |
+| UART 波特率 | 115200 |
 
-## 运动控制参数
+## UART 通信
 
-### 平滑跟踪模式
+MCU 通过 UART 与 S3 主控通信：
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| 跟踪周期 | 15ms | 每15ms更新一次舵机位置 |
-| 步长 | 1° | 每次移动的角度 |
-| 响应速度 | ~67°/s | 1°/15ms × 1000ms |
+| 参数 | 值 |
+|------|-----|
+| TX | GPIO 4 |
+| RX | GPIO 5 |
+| 波特率 | 115200 |
+| 数据位 | 8 |
+| 停止位 | 1 |
 
-### 时间控制模式
+S3 发送命令格式与 BLE 相同，MCU 会通过 `command` 模块统一处理。
 
-| 参数 | 值 | 说明 |
-|------|-----|------|
-| 最小时间 | 50ms | 避免舵机死区 |
-| 最大时间 | 5000ms | 避免等待过长 |
-| 速度计算 | 动态 | 每步角度 = 总差值 / (时间/15ms) |
+## 固件文件
 
-## MTU 配置
+| 文件 | 地址 | 说明 |
+|------|------|------|
+| `bootloader.bin` | 0x0 | ESP-IDF 引导程序 |
+| `partition-table.bin` | 0x8000 | 分区表 |
+| `MVP-W-MCU.bin` | 0x10000 | 应用固件 |
 
-- **本地 MTU**: 512 字节（在 `ble.c` 中设置，建议连接后手动请求 MTU 512）
-- **特征值最大长度**: 500 字节
+## 故障排除
 
-如需修改 MTU，在 `main/ble/ble.c` 中找到：
-```c
-esp_ble_gatt_set_local_mtu(512);
-```
+### 烧录失败
 
-## 构建命令
+1. **找不到设备**
+   - 检查 USB 连接
+   - 安装 CH340/CP2102 驱动
 
-```bash
-# 设置目标芯片
-idf.py set-target esp32
+2. **连接失败**
+   - 确保设备处于下载模式（按住 BOOT → 按 RST → 松开 BOOT）
+   - 尝试降低波特率：`.\flash.ps1 -Port COM4 -Baud 115200`
 
-# 编译
-idf.py build
+3. **esptool 未找到**
+   ```powershell
+   pip install esptool
+   ```
 
-# 烧录和监控
-idf.py -p PORT flash monitor
-```
+### BLE 连接问题
+
+- 设备名称：ESP_ROBOT
+- 使用 nRF Connect 或 LightBlue 扫描
+- 必须使用 "Write Request" 模式发送命令
 
 ## 技术栈
 
@@ -168,126 +234,9 @@ idf.py -p PORT flash monitor
 - LEDC PWM
 - FreeRTOS
 
-## 后续扩展
+## 相关链接
 
-- **UART 通信**: 与其他 MCU 通信
-- **更多舵机**: 扩展到 4+ 舵机
-- **动作录制**: 录制自定义动作
-
----
-
-## 快速开始指南
-
-### 1. 连接蓝牙
-
-设备名称: **ESP_ROBOT**
-
-使用手机 App (如 nRF Connect, LightBlue) 或电脑 BLE 工具扫描并连接。
-
-### 2. GATT 服务结构
-
-| 服务/特征 | UUID | 说明 |
-|-----------|------|------|
-| 主服务 | 0x00FF | |
-| SERVO_CTRL (写) | 0xFF01 | 写入舵机指令 |
-| ACTION_CTRL (写) | 0xFF02 | 写入动作指令 |
-| STATUS (通知) | 0xFF03 | 接收状态反馈 |
-
-### 3. 控制命令
-
-#### 模式1：平滑跟踪（转盘/滑块控制）
-
-写入特征值 **0xFF01**：
-
-```
-# 设置X轴(舵机0)到90度
-SET_SERVO:0:90
-
-# 设置Y轴(舵机1)到120度
-SET_SERVO:1:120
-```
-
-格式: `SET_SERVO:<舵机ID>:<角度>`
-
-**工作原理**：
-- 速度固定约67°/s（每15ms移动1°）
-- 即使APP频繁发送命令，舵机也会平滑向最新目标移动
-- 适合转盘、滑块等需要丝滑控制的场景
-
-#### 模式2：时间控制（指定时间到达）
-
-写入特征值 **0xFF01**：
-
-```
-# 500ms内到达90度
-SET_SERVO:0:90:500
-
-# 1000ms内到达120度
-SET_SERVO:1:120:1000
-```
-
-格式: `SET_SERVO:<舵机ID>:<角度>:<时间ms>`
-
-**工作原理**：
-- 时间范围：50ms - 5000ms
-- 速度动态计算，保证在指定时间内到达
-- 适合动作表演
-
-#### 模式3：摇杆（持续移动）
-
-写入特征值 **0xFF01**：
-
-```
-# 舵机0正向持续移动
-SERVO_MOVE:0:1
-
-# 舵机0反向持续移动
-SERVO_MOVE:0:-1
-
-# 停止舵机0移动
-SERVO_MOVE:0:0
-```
-
-#### 播放预设动作
-
-写入特征值 **0xFF01**：
-
-```
-# 播放动作0 (wave)
-PLAY_ACTION:0
-
-# 播放动作1 (greet)
-PLAY_ACTION:1
-```
-
-### 4. 示例
-
-使用 nRF Connect App:
-1. 扫描连接 "ESP_ROBOT"
-2. 点击服务右侧的七星图标（Discover Services）
-3. 找到 "SERVO CTRL" 特征 (UUID: 0xFF01)
-4. 点击右上角菜单，选择 **"Write Request"**（不是 Write Without Response）
-5. 输入命令：`SET_SERVO:1:110`
-6. 在底部文本框输入后点击发送按钮
-
-**注意**：必须使用 "Write Request"，否则数据会被截断。
-
----
-
-## 📦 Releases
-
-Pre-built binaries are available in the [release/](release/) folder:
-
-| File | Address |
-|------|---------|
-| `bootloader.bin` | 0x0000 |
-| `partition-table.bin` | 0x8000 |
-| `WatcherRobotBody.bin` | 0x10000 |
-
-See [release/README.md](release/README.md) for flashing instructions.
-
----
-
-## 📋 Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for version history.
+- [MVP-W 主项目](../../CLAUDE.md)
+- [S3 固件](../s3/)
+- [UART 协议文档](docs/UART_PROTOCOL.md)
+- [更新日志](CHANGELOG.md)
