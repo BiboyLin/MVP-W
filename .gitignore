@@ -74,7 +74,9 @@ logs/
 *.bak
 *.backup
 
-# === Claude Code ===
+# === Claude Code (AI assistant context - not for open source) ===
+CLAUDE.md
+**/CLAUDE.md
 memory/
 .claude/
 
